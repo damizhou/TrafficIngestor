@@ -61,7 +61,7 @@ class BaseTrafficIngestor(ABC):
     CREATE_WITH_TTY: bool = True
     DOCKER_EXEC_TIMEOUT: int = 6000
     RETRY: int = 5
-    EXEC_INTERVAL: float = 0.5
+    EXEC_INTERVAL: float = 1.0
     DEFAULT_UID: int = int(os.environ.get('SUDO_UID', os.getuid()))
     DEFAULT_GID: int = int(os.environ.get('SUDO_GID', os.getgid()))
 
@@ -441,14 +441,14 @@ class BaseTrafficIngestor(ABC):
 
         # 构建目标目录
         domain = task.get('domain', 'unknown')
-        dst = os.path.join(self.BASE_DST, domain)
+        date_str = time.strftime("%Y%m%d")
 
         # 移动文件
-        new_pcap = self.move_and_chown(pcap_path, os.path.join(dst, 'pcap'))
-        new_ssl = self.move_and_chown(ssl_key_file_path, os.path.join(dst, 'ssl_key'))
-        new_content = self.move_and_chown(content_path, os.path.join(dst, 'content'))
-        new_html = self.move_and_chown(html_path, os.path.join(dst, 'html'))
-        new_screenshot = self.move_and_chown(screenshot_path, os.path.join(dst, 'screenshot'))
+        new_pcap = self.move_and_chown(pcap_path, os.path.join(self.BASE_DST, 'pcap', date_str, domain))
+        new_ssl = self.move_and_chown(ssl_key_file_path, os.path.join(self.BASE_DST, 'ssl_key', date_str, domain))
+        new_content = self.move_and_chown(content_path, os.path.join(self.BASE_DST, 'content', date_str, domain))
+        new_html = self.move_and_chown(html_path, os.path.join(self.BASE_DST, 'html', date_str, domain))
+        new_screenshot = self.move_and_chown(screenshot_path, os.path.join(self.BASE_DST, 'screenshot', date_str, domain))
 
         # 调用成功回调
         self.on_task_success(task, {
