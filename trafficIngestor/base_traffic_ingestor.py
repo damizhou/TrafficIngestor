@@ -61,16 +61,17 @@ class BaseTrafficIngestor(ABC):
     CREATE_WITH_TTY: bool = True
     DOCKER_EXEC_TIMEOUT: int = 6000
     RETRY: int = 5
-    EXEC_INTERVAL: float = 0.5
+    FIRST_EXEC_INTERVAL: float = 1.0
     DEFAULT_UID: int = int(os.environ.get('SUDO_UID', os.getuid()))
     DEFAULT_GID: int = int(os.environ.get('SUDO_GID', os.getgid()))
 
     def __init__(self):
-        self._last_exec_ts = 0.0
-        self._last_exec_lock = threading.Lock()
         self._stats_lock = threading.Lock()
         self._csv_lock = threading.Lock()
         self._pbar = None
+        self._first_exec_lock = threading.Lock()
+        self._first_exec_next_ts = 0.0
+        self._first_exec_done_containers = set()
 
         # 全局统计
         self._global_start_time = 0.0
@@ -355,18 +356,20 @@ class BaseTrafficIngestor(ABC):
                     pass
                 raise
 
-    # ============== 节流控制 ==============
-    def _wait_before_exec(self) -> None:
-        """全局节流：保证每次 docker exec 至少间隔 EXEC_INTERVAL 秒"""
-        while True:
-            with self._last_exec_lock:
-                now = time.monotonic()
-                delta = self._last_exec_ts + self.EXEC_INTERVAL - now
-                if delta <= 0:
-                    self._last_exec_ts = now
-                    return
-            if delta > 0:
-                time.sleep(min(delta, 0.5))
+    def _wait_before_first_exec(self, container: str) -> None:
+        """仅在每个容器第一次执行 docker exec 前做全局节流。"""
+        interval = max(float(self.FIRST_EXEC_INTERVAL), 0.0)
+        with self._first_exec_lock:
+            if container in self._first_exec_done_containers:
+                return
+            now = time.monotonic()
+            scheduled = max(now, self._first_exec_next_ts)
+            self._first_exec_next_ts = scheduled + interval
+            self._first_exec_done_containers.add(container)
+
+        wait = scheduled - now
+        if wait > 0:
+            time.sleep(wait)
 
     # ============== 进度条 ==============
     def _update_progress(self, ok: bool, task_elapsed: float = 0.0) -> None:
@@ -396,9 +399,9 @@ class BaseTrafficIngestor(ABC):
     # ============== 任务执行 ==============
     def exec_once(self, task: Dict[str, str]) -> Tuple[bool, str]:
         """执行单个任务"""
-        self._wait_before_exec()
-        payload = json.dumps(task, ensure_ascii=False)
         container = task["container"]
+        self._wait_before_first_exec(container)
+        payload = json.dumps(task, ensure_ascii=False)
         cmd = [
             "docker", "exec", container,
             "python", "-u", f"{self.CONTAINER_CODE_PATH}/action.py",
