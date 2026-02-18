@@ -64,6 +64,7 @@ class BaseTrafficIngestor(ABC):
     FIRST_EXEC_INTERVAL: float = 1.0
     DEFAULT_UID: int = int(os.environ.get('SUDO_UID', os.getuid()))
     DEFAULT_GID: int = int(os.environ.get('SUDO_GID', os.getgid()))
+    CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH: bool = True
 
     def __init__(self):
         self._stats_lock = threading.Lock()
@@ -625,7 +626,8 @@ class BaseTrafficIngestor(ABC):
                     for task, err in stats["errors"][:10]:
                         self.log(f" - id={task.get('row_id','')} url={task.get('url','')} err={err[:200]}")
 
-                self.clear_host_code_subdirs()
+                if self.CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH:
+                    self.clear_host_code_subdirs()
 
                 # 如果只需要运行一次，跳出循环
                 if not self.should_continue():
