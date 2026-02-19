@@ -9,7 +9,9 @@ news_receiver_traffic.py
 import os
 import sys
 import configparser
-from typing import List, Dict
+import time
+import threading
+from typing import List, Dict, Tuple
 
 from sqlalchemy import create_engine, text
 
@@ -20,6 +22,62 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor, get_real_username
+
+
+class _DailyErrorLogWriter:
+    """按天切分错误日志文件。"""
+
+    def __init__(self, logs_dir: str, file_prefix: str):
+        self._logs_dir = logs_dir
+        self._file_prefix = file_prefix
+        self._lock = threading.Lock()
+        self._fp = None
+        self._current_day = ""
+        self._current_path = ""
+        os.makedirs(self._logs_dir, exist_ok=True)
+
+    def _rotate_if_needed(self) -> None:
+        day = time.strftime("%Y%m%d")
+        if self._fp is not None and day == self._current_day:
+            return
+
+        if self._fp is not None:
+            try:
+                self._fp.flush()
+            finally:
+                self._fp.close()
+
+        self._current_day = day
+        self._current_path = os.path.join(self._logs_dir, f"{self._file_prefix}_{day}.log")
+        self._fp = open(self._current_path, "a", encoding="utf-8", buffering=1)
+
+    @property
+    def path(self) -> str:
+        with self._lock:
+            if not self._current_path:
+                self._rotate_if_needed()
+            return self._current_path
+
+    def write(self, message: str) -> None:
+        line = (message or "").rstrip("\n")
+        if not line:
+            return
+
+        with self._lock:
+            self._rotate_if_needed()
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            self._fp.write(f"[{ts}] {line}\n")
+            self._fp.flush()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._fp is None:
+                return
+            try:
+                self._fp.flush()
+            finally:
+                self._fp.close()
+                self._fp = None
 
 
 class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
@@ -51,19 +109,59 @@ class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
     }
 
     DB_CONFIG_PATH = os.path.join(_project_root, 'db', 'db_config.ini')
+    ERROR_LOG_PREFIX = "traffic_capture_single_db_error"
+
+    ERROR_KEYWORDS = (
+        " -> fail",
+        " -> timeout",
+        " -> error",
+        " -> give up",
+        "warn:",
+        "fatal:",
+        "error:",
+        "异常",
+        "失败",
+    )
 
     def __init__(self):
         super().__init__()
         self._db_engine = None
+        logs_dir = os.path.join(_current_dir, "logs")
+        self._error_log_writer = _DailyErrorLogWriter(logs_dir, self.ERROR_LOG_PREFIX)
+
+    @classmethod
+    def _is_error_message(cls, msg: str) -> bool:
+        msg_lc = msg.lower()
+        return any(k in msg_lc for k in cls.ERROR_KEYWORDS)
+
+    def log(self, *args) -> None:
+        super().log(*args)
+        msg = " ".join(str(x) for x in args)
+        if self._is_error_message(msg):
+            self._error_log_writer.write(msg)
 
     def setup(self) -> None:
         """初始化数据库连接"""
         try:
             self._db_engine = self._connect_db()
             self.log("数据库连接成功")
+            self.log(f"错误日志文件(按天): {self._error_log_writer.path}")
         except Exception as e:
             self.log(f"FATAL: 数据库连接失败，无法继续: {e}")
             sys.exit(1)
+
+    def cleanup(self) -> None:
+        self._error_log_writer.close()
+
+    def exec_once(self, task: Dict[str, str]) -> Tuple[bool, str]:
+        ok, err = super().exec_once(task)
+        if ok:
+            return True, err
+
+        url = str(task.get("url", "")).strip()
+        if url and "url=" not in err:
+            return False, f"url={url} | {err}"
+        return False, err
 
     def _connect_db(self):
         """连接数据库并返回引擎"""
@@ -176,7 +274,10 @@ class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
         try:
             row_id = int(task.get("row_id", "0"))
             domain = task.get("domain", "")
+            url = task.get("url", "")
             table = self.TABLE_MAP.get(domain, "")
+
+            self.log(f"ERROR: 任务最终失败 row_id={row_id} url={url} err={error[:200]}")
 
             if not table:
                 return
@@ -192,12 +293,12 @@ class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
                 with conn.cursor() as cur:
                     cur.execute(sql, ('error', row_id))
                 conn.commit()
-                self.log(f"失败记录已标记到数据库 row_id={row_id}")
+                self.log(f"失败记录已标记到数据库 row_id={row_id} url={url}")
             finally:
                 conn.close()
 
         except Exception as e:
-            self.log(f"WARN: 数据库标记异常 row_id={task.get('row_id', '')}: {e}")
+            self.log(f"WARN: 数据库标记异常 row_id={task.get('row_id', '')} url={task.get('url', '')}: {e}")
 
 
 if __name__ == "__main__":
