@@ -111,16 +111,16 @@ class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
     DB_CONFIG_PATH = os.path.join(_project_root, 'db', 'db_config.ini')
     ERROR_LOG_PREFIX = "traffic_capture_single_db_error"
 
+    FINAL_FAILURE_KEYWORDS = (
+        " -> give up",     # BaseTrafficIngestor 在重试耗尽后输出
+        "任务最终失败",       # 本文件 on_task_failed 中的最终失败标记
+    )
+
     ERROR_KEYWORDS = (
-        " -> fail",
-        " -> timeout",
-        " -> error",
-        " -> give up",
         "warn:",
         "fatal:",
         "error:",
         "异常",
-        "失败",
     )
 
     def __init__(self):
@@ -132,6 +132,8 @@ class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
     @classmethod
     def _is_error_message(cls, msg: str) -> bool:
         msg_lc = msg.lower()
+        if any(k in msg_lc for k in cls.FINAL_FAILURE_KEYWORDS):
+            return True
         return any(k in msg_lc for k in cls.ERROR_KEYWORDS)
 
     def log(self, *args) -> None:

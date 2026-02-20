@@ -78,7 +78,7 @@ class BaseTrafficIngestor(ABC):
         self._global_start_time = 0.0
         self._global_ok = 0
         self._global_fail = 0
-        self._global_task_time = 0.0
+        self._global_container_count = max(int(self.CONTAINER_COUNT), 1)
 
     # ============== 日志 ==============
     def log(self, *args) -> None:
@@ -380,7 +380,6 @@ class BaseTrafficIngestor(ABC):
                 self._global_ok += 1
             else:
                 self._global_fail += 1
-            self._global_task_time += task_elapsed
 
             total_done = self._global_ok + self._global_fail
             elapsed = time.time() - self._global_start_time
@@ -388,7 +387,8 @@ class BaseTrafficIngestor(ABC):
 
             # 计算统计数据
             per_min = total_done / elapsed_min if elapsed_min > 0 else 0
-            avg_time = self._global_task_time / total_done if total_done > 0 else 0
+            # 平均耗时按并发容器折算：运行时长 * 容器总数 / 完成任务数
+            avg_time = (elapsed * self._global_container_count / total_done) if total_done > 0 else 0
 
             if self._pbar is not None:
                 self._pbar.set_description(
@@ -597,10 +597,10 @@ class BaseTrafficIngestor(ABC):
         # 准备容器池
         names = self.prepare_pool_once()
 
+        self._global_container_count = max(len(names), 1)
         self._global_start_time = time.time()
         self._global_ok = 0
         self._global_fail = 0
-        self._global_task_time = 0.0
         batch_num = 0
 
         # 创建常驻进度条（total=None 表示未知总数）
@@ -647,7 +647,7 @@ class BaseTrafficIngestor(ABC):
         elapsed_min = elapsed / 60.0
         total_done = self._global_ok + self._global_fail
         per_min = total_done / elapsed_min if elapsed_min > 0 else 0
-        avg_time = self._global_task_time / total_done if total_done > 0 else 0
+        avg_time = (elapsed * self._global_container_count / total_done) if total_done > 0 else 0
         self.log(f"[最终汇总] 批次={batch_num} | 运行时间={elapsed_min:.1f}分钟 | 总数={total_done} | "
                  f"成功={self._global_ok} | 失败={self._global_fail} | 每分钟={per_min:.2f} | 平均耗时={avg_time:.1f}秒")
 
