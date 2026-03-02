@@ -94,22 +94,34 @@ class BaseAction(ABC):
         Returns:
             bool: 文件是否有效
         """
-        if not os.path.exists(pcap_path) or not os.path.exists(ssl_key_file_path):
+        pcap_exists = bool(pcap_path) and os.path.exists(pcap_path)
+        ssl_exists = bool(ssl_key_file_path) and os.path.exists(ssl_key_file_path)
+        content_exists = bool(content_path) and os.path.exists(content_path)
+        html_exists = bool(html_path) and os.path.exists(html_path)
+
+        if not pcap_exists or not ssl_exists:
+            self.logger.info(
+                f"基础文件缺失: pcap_exists={pcap_exists}, ssl_key_exists={ssl_exists}, "
+                f"content_exists={content_exists}, html_exists={html_exists}"
+            )
             return False
 
         pcap_file_size = os.path.getsize(pcap_path)
         ssl_key_file_size = os.path.getsize(ssl_key_file_path)
+        pcap_ok = pcap_file_size > self.pcap_lowest_size
+        ssl_ok = ssl_key_file_size > self.ssl_key_lowest_size
 
         self.logger.info(f"pcap文件大小：{pcap_file_size}，ssl_key文件大小：{ssl_key_file_size}")
 
-        if (pcap_file_size > self.pcap_lowest_size and
-            ssl_key_file_size > self.ssl_key_lowest_size and
-            os.path.exists(content_path) and
-            os.path.exists(html_path)):
+        if pcap_ok and ssl_ok and content_exists and html_exists:
             return True
 
-        self.logger.info(f"pcap_lowest_size:{self.pcap_lowest_size} > pcap_file_size:{pcap_file_size}")
-        self.logger.info(f"ssl_key_lowest_size:{self.ssl_key_lowest_size} > ssl_key_file_size:{ssl_key_file_size}")
+        self.logger.info(
+            "校验详情: "
+            f"pcap_ok={pcap_ok}({pcap_file_size}>{self.pcap_lowest_size}), "
+            f"ssl_key_ok={ssl_ok}({ssl_key_file_size}>{self.ssl_key_lowest_size}), "
+            f"content_exists={content_exists}, html_exists={html_exists}"
+        )
         return False
 
     def check_page_not_found(self, html_path, domain):
@@ -161,6 +173,7 @@ class BaseAction(ABC):
         screenshot_path = ""
         pcap_path = ""
         current_url = ""
+        open_url_error = ""
 
         # 开流量收集
         traffic_thread = threading.Thread(
@@ -183,6 +196,7 @@ class BaseAction(ABC):
                 data_base_dir=_project_root
             )
         except Exception as e:
+            open_url_error = repr(e).replace("\n", " ")
             self.logger.error(f"open_url_and_save_content 异常: {e}")
 
         try:
@@ -241,7 +255,19 @@ class BaseAction(ABC):
             if page_not_found:
                 self.logger.warning(f"页面不存在，任务失败: row_id={row_id}")
             else:
-                self.logger.warning(f"文件校验失败，任务失败: row_id={row_id}")
+                reasons = []
+                if open_url_error:
+                    reasons.append(f"open_url_error={open_url_error[:180]}")
+                if not (content_path and os.path.exists(content_path)):
+                    reasons.append("content_missing")
+                if not (html_path and os.path.exists(html_path)):
+                    reasons.append("html_missing")
+                if not (pcap_path and os.path.exists(pcap_path)):
+                    reasons.append("pcap_missing")
+                if not (ssl_key_file_path and os.path.exists(ssl_key_file_path)):
+                    reasons.append("ssl_key_missing")
+                reason_text = f" | {', '.join(reasons)}" if reasons else ""
+                self.logger.warning(f"文件校验失败，任务失败: row_id={row_id}{reason_text}")
 
         self.write_result(meta_path, result)
 

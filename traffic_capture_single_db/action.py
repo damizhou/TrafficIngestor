@@ -1,6 +1,6 @@
 """
-traffic_capture/action.py - BBC新闻流量捕获
-继承BaseAction，添加BBC特定的404检测逻辑
+traffic_capture_single_db/action.py - 新闻流量捕获
+继承BaseAction，按需扩展站点特定逻辑
 """
 import sys
 import os
@@ -13,16 +13,16 @@ if _current_dir not in sys.path:
 from tools.base_action import BaseAction
 
 
-class BBCAction(BaseAction):
-    """BBC新闻流量捕获Action"""
+class NewsReceiverAction(BaseAction):
+    """新闻流量捕获 Action"""
 
-    # BBC的阈值设置
+    # 默认阈值（可按站点调整）
     pcap_lowest_size = 100000
     ssl_key_lowest_size = 1000
 
     def check_page_not_found(self, html_path, domain):
         """
-        检查BBC页面是否为404
+        检查页面是否为404
         """
         if "bbc" not in domain:
             return False
@@ -53,4 +53,4 @@ class BBCAction(BaseAction):
 
 
 if __name__ == "__main__":
-    BBCAction.run_from_argv()
+    NewsReceiverAction.run_from_argv()

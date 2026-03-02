@@ -24,13 +24,20 @@ class XTrafficIngestor(BaseTrafficIngestor):
 
     # ============== 配置 ==============
     CONTAINER_PREFIX = f"{get_real_username()}_traffic_capture_single_csv"
-    CONTAINER_COUNT = 21 * 20
+    CONTAINER_COUNT = 15 * 20
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv')
-    BASE_DST = '/netdisk/x_with_ssl_key/collection_without_login_260123'
+    BASE_DST = '/netdisk/ww/top200000'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 
-    CSV_PATH = os.path.join(_project_root, 'db', 'users_converted.csv')
+    # CSV 必须包含表头，字段名（大小写不敏感）：
+    # - id: 唯一标识，用于任务完成/失败后从 CSV 删除对应行
+    # - url: 访问地址（建议完整 URL，包含 http:// 或 https://）
+    # - domain: 域名（用于日志与流量采集标识）
+    # 示例：
+    # id,url,domain
+    # 1,https://vox-cdn.com,vox-cdn.com
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'top200000_ingestor.csv')
 
     def __init__(self):
         super().__init__()

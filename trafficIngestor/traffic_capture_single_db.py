@@ -85,13 +85,15 @@ class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
 
     # ============== 配置 ==============
     CONTAINER_PREFIX = f"{get_real_username()}_traffic_capture_single_db"
-    CONTAINER_COUNT = 26 * 20
+    # 默认并发不宜过高；可通过环境变量覆盖（例如 180）
+    CONTAINER_COUNT = int(os.environ.get("TRAFFIC_CAPTURE_SINGLE_DB_CONTAINER_COUNT", "120"))
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_db')
     BASE_DST = '/netdisk/news_receiver'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     BATCH_SIZE = 20000
     CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH = False
+    FINAL_FAIL_TRAFFIC_STATUS = -1
 
     # 需要处理的表及其对应的 domain
     TABLES_CONFIG = [
@@ -154,6 +156,13 @@ class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
 
     def cleanup(self) -> None:
         self._error_log_writer.close()
+        if self._db_engine is not None:
+            try:
+                self._db_engine.dispose()
+            except Exception as e:
+                self.log(f"WARN: 关闭数据库连接池异常: {e}")
+            finally:
+                self._db_engine = None
 
     def exec_once(self, task: Dict[str, str]) -> Tuple[bool, str]:
         ok, err = super().exec_once(task)
@@ -209,21 +218,24 @@ class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
                 SELECT id, url
                 FROM {table}
                 WHERE (pcap_path IS NULL OR pcap_path = '')
+                AND (traffic_status IS NULL OR traffic_status <> :final_fail_status)
                 AND url IS NOT NULL AND url <> ''
                 ORDER BY id
                 LIMIT {self.BATCH_SIZE}
             """
 
             try:
+                table_jobs: List[Dict[str, str]] = []
                 with self._db_engine.connect() as conn:
-                    result = conn.execute(text(sql))
+                    result = conn.execute(text(sql), {"final_fail_status": self.FINAL_FAIL_TRAFFIC_STATUS})
                     for row in result:
                         row_id = str(row[0])
                         url = row[1]
-                        all_jobs.append({"row_id": row_id, "url": url, "domain": domain})
+                        table_jobs.append({"row_id": row_id, "url": url, "domain": domain})
 
-                if all_jobs:
-                    self.log(f"从 {table} 获取了 {len(all_jobs)} 条任务")
+                if table_jobs:
+                    self.log(f"从 {table} 获取了 {len(table_jobs)} 条任务")
+                    all_jobs.extend(table_jobs)
             except Exception as e:
                 self.log(f"WARN: 从数据库获取任务失败: {e}")
 
@@ -261,15 +273,15 @@ class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
                     cur.execute(sql, data)
                     affected = cur.rowcount
                 conn.commit()
-                if affected > 0:
-                    self.log(f"数据库更新成功 row_id={row_id}")
-                else:
-                    self.log(f"数据库更新失败或无匹配行 row_id={row_id}")
+                if affected <= 0:
+                    raise RuntimeError(f"数据库更新无匹配行 row_id={row_id}")
+                self.log(f"数据库更新成功 row_id={row_id}")
             finally:
                 conn.close()
 
         except Exception as e:
             self.log(f"WARN: 数据库操作异常 row_id={task.get('row_id', '')}: {e}")
+            raise
 
     def on_task_failed(self, task: Dict[str, str], error: str) -> None:
         """任务失败后标记数据库"""
@@ -286,16 +298,20 @@ class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
 
             sql = f"""
                 UPDATE {table}
-                SET pcap_path=%s
+                SET traffic_status=%s
                 WHERE id=%s AND (pcap_path IS NULL OR pcap_path = '')
             """.strip()
 
             conn = self._db_engine.raw_connection()
             try:
                 with conn.cursor() as cur:
-                    cur.execute(sql, ('error', row_id))
+                    cur.execute(sql, (self.FINAL_FAIL_TRAFFIC_STATUS, row_id))
+                    affected = cur.rowcount
                 conn.commit()
-                self.log(f"失败记录已标记到数据库 row_id={row_id} url={url}")
+                if affected > 0:
+                    self.log(f"失败记录已标记到数据库 row_id={row_id} url={url}")
+                else:
+                    self.log(f"WARN: 失败记录未写入（无匹配行） row_id={row_id} url={url}")
             finally:
                 conn.close()
 
