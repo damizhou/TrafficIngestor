@@ -86,7 +86,7 @@ class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
     # ============== 配置 ==============
     CONTAINER_PREFIX = f"{get_real_username()}_traffic_capture_single_db"
     # 默认并发不宜过高；可通过环境变量覆盖（例如 180）
-    CONTAINER_COUNT = int(os.environ.get("TRAFFIC_CAPTURE_SINGLE_DB_CONTAINER_COUNT", "120"))
+    CONTAINER_COUNT = 15 * 20
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_db')
     BASE_DST = '/netdisk/news_receiver'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
