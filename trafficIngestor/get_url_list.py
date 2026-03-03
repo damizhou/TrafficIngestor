@@ -53,22 +53,22 @@ def get_real_username() -> str:
 # Docker 容器名前缀，格式为 "{用户名}_get_url_list"
 CONTAINER_PREFIX = f"{get_real_username()}_get_url_list"
 # Docker 容器池的容器数量
-CONTAINER_COUNT = 3
+CONTAINER_COUNT = 400
 # 宿主机上 url_list_collector 代码目录的绝对路径，会被挂载到容器内 /app
 HOST_CODE_PATH = os.path.join(_project_root, "url_list_collector")
 # 爬虫使用的 Docker 镜像名称
 DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
 # 任务失败后的最大重试次数
-RETRY = 0
+RETRY = 3
 
 # 源数据 CSV 文件路径，包含待爬取的网站列表
-SOURCE_CSV = os.path.join(_project_root, "small_tools", "test.csv")
+SOURCE_CSV = os.path.join(_project_root, "small_tools", "top4000.csv")
 # 输出结果的根目录，每个域名会在此目录下创建子目录存放 url_list.csv
 OUTPUT_BASE_DIR = "/netdisk/ww/top2000/subpages"
 # 记录失败任务的 CSV 文件路径
 FAILED_CSV = os.path.join(_current_dir, "get_url_list_failed.csv")
 # 每个域名需要采集的目标 URL 数量
-TARGET_URLS_PER_DOMAIN = 3
+TARGET_URLS_PER_DOMAIN = 40
 # 结束后是否清理容器和临时子目录（默认关闭，便于排查）
 CLEANUP_ON_EXIT = False
 # 启动前是否清理上一轮遗留的临时文件

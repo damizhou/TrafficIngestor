@@ -134,7 +134,7 @@ class TraceSpiderDownloaderMiddleware:
         # - or raise IgnoreRequest: process_exception() methods of
         #   installed downloader middleware will be called
         # 打印页面内容
-        if task_instance.requesturlNum > task_instance.target_urls_per_domain:
+        if task_instance.requesturlNum >= task_instance.target_urls_per_domain:
             raise IgnoreRequest(
                 f"超过{task_instance.target_urls_per_domain}个页面限制，忽略请求"
             )

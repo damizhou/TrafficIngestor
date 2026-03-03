@@ -80,9 +80,6 @@ def main() -> None:
     logger.info("清理浏览器进程")
     kill_chrome_processes()
 
-    # 8. 等待 TCP 结束挥手
-    logger.info("等待TCP结束挥手完成")
-
     # 兜底：若未采集到任何 URL，至少保留种子 URL 以避免空结果
     if not task_instance.collected_urls and url:
         task_instance.collected_urls.append(url)
