@@ -68,9 +68,11 @@ OUTPUT_BASE_DIR = "/netdisk/ww/top2000/subpages"
 # 记录失败任务的 CSV 文件路径
 FAILED_CSV = os.path.join(_current_dir, "get_url_list_failed.csv")
 # 每个域名需要采集的目标 URL 数量
-TARGET_URLS_PER_DOMAIN = 5
+TARGET_URLS_PER_DOMAIN = 3
 # 结束后是否清理容器和临时子目录（默认关闭，便于排查）
 CLEANUP_ON_EXIT = False
+# 启动前是否清理上一轮遗留的临时文件
+STARTUP_CLEANUP_RESIDUAL_FILES = True
 # ==================================
 
 # 输出 CSV 文件的列头：序号、URL、域名
@@ -88,7 +90,7 @@ _failed_lock = threading.Lock()
 _domain_url_set: Dict[str, Set[str]] = {}
 
 
-def log(*a) -> None:
+def log(*a, container: Optional[str] = None) -> None:
     """带时间戳的日志输出。"""
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}]", *a, flush=True)
@@ -144,7 +146,6 @@ def create_container(name: str, host_code_path: str, image: str) -> None:
         "--init",
         "--dns", "172.17.0.1",
         "--volume", f"{host_code_path}:/app",
-        "--volume", f"{tools_path}:/app/tools",
         "-e", f"HOST_UID={uid}",
         "-e", f"HOST_GID={gid}",
         "--privileged",
@@ -241,6 +242,59 @@ def remove_containers() -> None:
         shell=True,
         check=False
     )
+
+
+def cleanup_startup_residual_files(container_names: List[str]) -> None:
+    """清理启动前遗留的临时文件，避免旧结果污染新一轮任务。"""
+    base = Path(HOST_CODE_PATH)
+    if not base.exists() or not base.is_dir():
+        log(f"WARN: 启动前清理跳过，代码目录不存在：{base}")
+        return
+
+    removed = 0
+
+    def _clear_dir_contents(dir_path: Path) -> None:
+        nonlocal removed
+        if not dir_path.exists() or not dir_path.is_dir():
+            return
+        for entry in dir_path.iterdir():
+            try:
+                if entry.is_dir():
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
+                removed += 1
+            except Exception as e:
+                log(f"WARN: 删除残余文件失败: {entry} -> {e}")
+
+    # 清理上一轮容器结果文件：meta/{container}_last.json
+    meta_dir = base / "meta"
+    for name in container_names:
+        p = meta_dir / f"{name}_last.json"
+        if not p.exists():
+            continue
+        try:
+            p.unlink()
+            removed += 1
+        except Exception as e:
+            log(f"WARN: 删除残余文件失败: {p} -> {e}")
+
+    # 清理 URL 请求轨迹临时文件
+    for pattern in ("request_url_*.txt",):
+        for p in base.glob(pattern):
+            if not p.is_file():
+                continue
+            try:
+                p.unlink()
+                removed += 1
+            except Exception as e:
+                log(f"WARN: 删除残余文件失败: {p} -> {e}")
+
+    # 清理运行时临时目录内容（保留目录）
+    for dirname in ("logs", "download", "tools"):
+        _clear_dir_contents(base / dirname)
+
+    log(f"启动前清理残余文件完成：removed={removed}")
 
 
 
@@ -469,7 +523,14 @@ def on_task_failed(task: Dict[str, Any], error: str) -> None:
 def exec_once(task: Dict[str, Any]) -> Tuple[bool, str]:
     """对单个任务执行一次 docker exec，成功则调用 process_result 解析结果。"""
     container = task["container"]
-    payload = json.dumps(task, ensure_ascii=False)
+    payload_obj = {
+        "row_id": task.get("row_id", ""),
+        "url": task.get("url", ""),
+        "domain": task.get("domain", ""),
+        "container": container,
+        "target_urls_per_domain": TARGET_URLS_PER_DOMAIN,
+    }
+    payload = json.dumps(payload_obj, ensure_ascii=False)
     cmd = [
         "docker", "exec", container,
         "python", "-u", "/app/action.py",
@@ -563,9 +624,12 @@ def run_once(names: List[str], jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
     log(f"开始执行：jobs={len(jobs)}，并发容器={len(names)}，镜像={DOCKER_IMAGE}")
 
     with ThreadPoolExecutor(max_workers=len(names)) as pool:
+        futures = []
         for n in names:
-            pool.submit(worker_loop, n, q, stats, RETRY)
+            futures.append(pool.submit(worker_loop, n, q, stats, RETRY))
         q.join()
+        for fut in futures:
+            fut.result()
 
     return stats
 
@@ -600,6 +664,8 @@ def main() -> None:
     signal.signal(signal.SIGTERM, sig)
 
     names = prepare_pool_once()
+    if STARTUP_CLEANUP_RESIDUAL_FILES:
+        cleanup_startup_residual_files(names)
     load_existing_output()
     jobs = fetch_jobs()
     if not jobs:

@@ -6,13 +6,46 @@ import time
 from scrapy import signals
 from scrapy.http import HtmlResponse
 from scrapy.exceptions import IgnoreRequest
-from selenium.webdriver.common.by import By
-from tools.math_tool import generate_normal_random
+from urllib.parse import urlparse
 from utils.logger import logger
-from utils.chrome import create_chrome_driver, scroll_to_bottom, add_cookies, open_url_and_save_content
-import json
+from utils.chrome import create_chrome_driver
 from utils.task import task_instance
-import utils.archive as archive
+
+
+
+def _normalize_url(raw_url: str) -> str:
+    return (raw_url or "").strip().split("#", 1)[0]
+
+
+def _is_same_site(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower().strip(".")
+    base = (task_instance.current_allowed_domain or "").lower().strip(".")
+    if not host or not base:
+        return False
+    return host == base or host.endswith("." + base)
+
+
+def _should_collect(url: str) -> bool:
+    if not url.startswith(("http://", "https://")):
+        return False
+    if not _is_same_site(url):
+        return False
+    if "/cdn-cgi/" in url or "challenge-platform" in url:
+        return False
+    if any(keyword in url for keyword in task_instance.exclude_keywords):
+        return False
+    return True
+
+
+def _collect_url(url: str) -> None:
+    normalized = _normalize_url(url)
+    if not normalized:
+        return
+    if not _should_collect(normalized):
+        return
+    if normalized not in task_instance.collected_urls:
+        task_instance.collected_urls.append(normalized)
+
 
 class TraceSpiderSpiderMiddleware:
     # Not all methods need to be defined. If a method is not defined,
@@ -80,7 +113,6 @@ class TraceSpiderDownloaderMiddleware:
             logger.info(f"cookies开始加载")
             self.browser.get('https://www.youtube.com/')
             # Retrieve all cookies
-            add_cookies(self.browser)
 
             self.browser.refresh()  # 带 cookie 重载
             logger.info("cookies加载完成")
@@ -102,52 +134,21 @@ class TraceSpiderDownloaderMiddleware:
         # - or raise IgnoreRequest: process_exception() methods of
         #   installed downloader middleware will be called
         # 打印页面内容
-        if task_instance.requesturlNum > 10:
-            raise IgnoreRequest(f"超过10个页面限制，忽略: {request.url}")
-        if task_instance.requesturlNum == 0:
-            with open(f'request_url_list_{task_instance.current_allowed_domain}.txt', 'a') as f:
-                f.write("index,domain,url\n")
-        # self.browser.get(request.url)
+        if task_instance.requesturlNum > task_instance.target_urls_per_domain:
+            raise IgnoreRequest(
+                f"超过{task_instance.target_urls_per_domain}个页面限制，忽略请求"
+            )
+
+        self.browser.get(request.url)
         try:
             task_instance.requesturlNum += 1
-            open_url_and_save_content(self.browser, request.url)
-            logger.info(f"requestURL:{request.url}")
+            logger.info(f"requestURL:{self.browser.current_url}")
+            _collect_url(self.browser.current_url)
             time.sleep(15)
         except Exception as e:
             logger.error(f"爬取 {request.url} 失败: {e}")
 
-        if 'youtube' in task_instance.current_allowed_domain:
-            if 'watch' in request.url:
-                video_element = self.browser.find_element(By.TAG_NAME, "video")
-                self.browser.execute_script("arguments[0].play();", video_element)
-                video_duration = self.browser.execute_script("return arguments[0].duration;", video_element)
-                print("视频总时长:", video_duration, "秒")
-                current_time = 0
-                i = 0
-                while current_time < video_duration and current_time < 180 and i < 5:
-                    i += 1
-                    current_time = self.browser.execute_script("return arguments[0].currentTime;", video_element)
-                    if current_time == 0:
-                        self.browser.execute_script("arguments[0].play();", video_element)
-                        time.sleep(20)
-                    else:
-                        time.sleep(40 + generate_normal_random())
-                        scroll_to_bottom(self.browser)
-
-                    print("当前播放时长:", current_time, "秒")
-
-            return HtmlResponse(url=request.url, body=self.browser.page_source, encoding='utf-8', request=request)
-        elif 'archive' in task_instance.current_allowed_domain:
-            if 'details' not in request.url:
-                url_set = archive.get_main_url(self.browser)
-            else:
-                url_set = archive.get_details_url(self.browser)
-            combined_html = ' '.join(url_set)
-            # 将字符串编码为字节类型
-            combined_html_bytes = combined_html.encode('utf-8')
-            return HtmlResponse(url=request.url, body=combined_html_bytes, encoding='utf-8', request=request)
-        else:
-            return HtmlResponse(url=request.url, body=self.browser.page_source, encoding='utf-8', request=request)
+        return HtmlResponse(url=request.url, body=self.browser.page_source, encoding='utf-8', request=request)
 
     def process_response(self, request, response, spider):
         # Called with the response returned from the downloader.

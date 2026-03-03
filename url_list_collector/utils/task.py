@@ -17,6 +17,7 @@ class Task:
             self.domain = ''
             self.container = 'unknown'
             self.requesturlNum = 0
+            self.target_urls_per_domain = 10
             self.collected_urls = []
             self.exclude_keywords = []
             self._initialized = True
@@ -24,12 +25,13 @@ class Task:
     def init_from_payload(self, payload: dict) -> None:
         """从 get_url_list.py 传入的 JSON payload 初始化。
 
-        payload: {"row_id": "1", "url": "https://example.com", "domain": "example.com", "container": "xxx"}
+        payload: {"row_id": "1", "url": "https://example.com", "domain": "example.com", "container": "xxx", "target_urls_per_domain": 5}
         """
         self.row_id = str(payload.get('row_id', '')).strip()
         self.url = (payload.get('url', '') or '').strip()
         self.domain = (payload.get('domain', '') or '').strip()
         self.container = str(payload.get('container', 'unknown')).strip() or 'unknown'
+        self.target_urls_per_domain = int(payload.get('target_urls_per_domain', self.target_urls_per_domain) or 40)
         self.requesturlNum = 0
         self.collected_urls = []
 

@@ -7,10 +7,11 @@ from utils.task import task_instance
 from utils.logger import logger, set_log_container
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
-from trace_spider.spiders.trace import TraceSpider
 
 # 容器内工作目录
 _current_dir = os.path.dirname(os.path.abspath(__file__))
+# 显式指定 Scrapy 配置模块，避免在无 scrapy.cfg 场景下丢失项目设置
+os.environ.setdefault("SCRAPY_SETTINGS_MODULE", "trace_spider.settings")
 
 
 def kill_chrome_processes():
@@ -41,6 +42,9 @@ def main() -> None:
 
     # 2. 初始化 task_instance（必须在导入 TraceSpider 之前，因为 Spider 类定义时会读取 task_instance 属性）
     task_instance.init_from_payload(payload)
+
+    # 延迟导入，确保 TraceSpider 类属性 start_urls/allowed_domains 读取到当前 payload
+    from trace_spider.spiders.trace import TraceSpider
 
     container = task_instance.container
     domain = task_instance.domain
@@ -78,7 +82,11 @@ def main() -> None:
 
     # 8. 等待 TCP 结束挥手
     logger.info("等待TCP结束挥手完成")
-    time.sleep(60)
+
+    # 兜底：若未采集到任何 URL，至少保留种子 URL 以避免空结果
+    if not task_instance.collected_urls and url:
+        task_instance.collected_urls.append(url)
+        logger.warning("未采集到有效子链接，回退写入种子URL")
 
     logger.info(
         f"{url} 流量收集结束，共爬取 {task_instance.requesturlNum} 个页面，"
