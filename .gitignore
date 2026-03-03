@@ -3,3 +3,5 @@
 db/
 */__pycache__/
 small_tools/
+url_list_collector/utils/__pycache__/
+url_list_collector/trace_spider/__pycache__/

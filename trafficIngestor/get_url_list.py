@@ -3,272 +3,623 @@
 """
 get_url_list.py
 
-从 small_tools/top2000.csv 读取站点列表，使用 Docker 容器中的浏览器抓取每个站点
-可访问页面的 URL（保存重定向后的最终 URL）。
+批量爬取网站子页面 URL 列表的调度脚本。
+- 管理 Docker 容器池
+- 并发下发 JSON 任务到 /app/action.py
+- /app 挂载 url_list_collector
+- 读取 meta/{container}_last.json 处理结果
 """
+
+from __future__ import annotations
 
 import csv
 import json
 import os
+import queue
+import shutil
+import signal
+import subprocess
 import sys
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
 # 添加项目根目录到路径
+# 当前脚本所在目录的绝对路径（trafficIngestor/）
 _current_dir = os.path.dirname(os.path.abspath(__file__))
+# 项目根目录的绝对路径（TrafficIngestor/）
 _project_root = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor, get_real_username
+
+def get_real_username() -> str:
+    """获取真实用户名。
+
+    在 sudo 环境下优先读取 SUDO_USER，否则读取 USER 环境变量，
+    最后回退到 os.getlogin()。用于生成容器名前缀。
+
+    Returns:
+        str: 当前登录用户的用户名。
+    """
+    return os.environ.get("SUDO_USER") or os.environ.get("USER") or os.getlogin()
 
 
-class URLListIngestor(BaseTrafficIngestor):
-    """URL 列表抓取器"""
+# ============== 配置 ==============
 
-    # ============== 配置 ==============
-    CONTAINER_PREFIX = f"{get_real_username()}_get_url_list"
-    CONTAINER_COUNT = int(os.environ.get("URL_LIST_CONTAINER_COUNT", "40"))
-    HOST_CODE_PATH = os.path.join(_project_root, "url_list_collector")
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
-    RETRY = int(os.environ.get("URL_LIST_RETRY", "2"))
-    DOCKER_EXEC_TIMEOUT = int(os.environ.get("URL_LIST_TIMEOUT", "2400"))
-    FIRST_EXEC_INTERVAL = 0.3
+# Docker 容器名前缀，格式为 "{用户名}_get_url_list"
+CONTAINER_PREFIX = f"{get_real_username()}_get_url_list"
+# Docker 容器池的容器数量
+CONTAINER_COUNT = 3
+# 宿主机上 url_list_collector 代码目录的绝对路径，会被挂载到容器内 /app
+HOST_CODE_PATH = os.path.join(_project_root, "url_list_collector")
+# 爬虫使用的 Docker 镜像名称
+DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
+# 任务失败后的最大重试次数
+RETRY = 0
 
-    SOURCE_CSV = os.path.join(_project_root, "small_tools", "top2000.csv")
-    OUTPUT_BASE_DIR = os.environ.get("URL_LIST_OUTPUT_BASE_DIR", "/netdisk/ww/top2000/subpages")
-    FAILED_CSV = os.path.join(_current_dir, "get_url_list_failed.csv")
-    TARGET_URLS_PER_DOMAIN = int(os.environ.get("URLS_PER_DOMAIN", "40"))
+# 源数据 CSV 文件路径，包含待爬取的网站列表
+SOURCE_CSV = os.path.join(_project_root, "small_tools", "test.csv")
+# 输出结果的根目录，每个域名会在此目录下创建子目录存放 url_list.csv
+OUTPUT_BASE_DIR = "/netdisk/ww/top2000/subpages"
+# 记录失败任务的 CSV 文件路径
+FAILED_CSV = os.path.join(_current_dir, "get_url_list_failed.csv")
+# 每个域名需要采集的目标 URL 数量
+TARGET_URLS_PER_DOMAIN = 5
+# 结束后是否清理容器和临时子目录（默认关闭，便于排查）
+CLEANUP_ON_EXIT = False
+# ==================================
 
-    OUTPUT_HEADER = ["id", "url", "domain"]
-    FAILED_HEADER = ["seed_id", "seed_url", "domain", "collected_count", "error"]
+# 输出 CSV 文件的列头：序号、URL、域名
+OUTPUT_HEADER = ["id", "url", "domain"]
+# 失败记录 CSV 文件的列头：种子ID、种子URL、域名、已采集数量、错误信息
+FAILED_HEADER = ["seed_id", "seed_url", "domain", "collected_count", "error"]
 
-    def __init__(self):
-        super().__init__()
-        self._has_jobs = True
-        self._output_lock = threading.Lock()
-        self._failed_lock = threading.Lock()
-        self._domain_url_set: Dict[str, Set[str]] = {}
-        self._load_existing_output()
+# 保护统计计数器（stats dict）的线程锁
+_stats_lock = threading.Lock()
+# 保护输出文件写入和 _domain_url_set 更新的线程锁
+_output_lock = threading.Lock()
+# 保护失败记录 CSV 写入的线程锁
+_failed_lock = threading.Lock()
+# 全局域名→已采集URL集合的映射，用于去重和断点续传
+_domain_url_set: Dict[str, Set[str]] = {}
 
-    @staticmethod
-    def _normalize_domain(value: str) -> str:
-        text = (value or "").strip()
-        if not text:
-            return ""
-        if "://" not in text:
-            text = "https://" + text
+
+def log(*a) -> None:
+    """带时间戳的日志输出。"""
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}]", *a, flush=True)
+
+
+def run(cmd: List[str], timeout: Optional[int] = None) -> subprocess.CompletedProcess:
+    """执行外部命令并捕获输出。"""
+    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+
+
+def ensure_docker_available() -> None:
+    """检查 Docker 是否可用，不可用则退出。"""
+    try:
+        run(["docker", "version"]).check_returncode()
+    except Exception as e:
+        log("FATAL: docker 不可用。", e)
+        sys.exit(2)
+
+
+def container_exists(name: str) -> Optional[bool]:
+    """检查容器是否存在。返回 True/False 表示存在，None 表示不存在。"""
+    cp = run(["docker", "inspect", "-f", "{{.State.Running}}", name])
+    if cp.returncode != 0:
+        return None
+    out = cp.stdout.strip().lower()
+    return (out == "true") or (out == "false")
+
+
+def container_running(name: str) -> bool:
+    """检查容器是否正在运行。"""
+    cp = run(["docker", "inspect", "-f", "{{.State.Running}}", name])
+    return (cp.returncode == 0) and (cp.stdout.strip().lower() == "true")
+
+
+def _safe_uid_gid() -> Tuple[str, str]:
+    """安全地获取当前用户的 UID 和 GID。"""
+    uid = os.environ.get("SUDO_UID")
+    gid = os.environ.get("SUDO_GID")
+    if uid and gid:
+        return uid, gid
+    try:
+        return str(os.getuid()), str(os.getgid())
+    except Exception:
+        return "1000", "1000"
+
+
+def create_container(name: str, host_code_path: str, image: str) -> None:
+    """创建新的 Docker 容器，挂载代码目录和 tools 目录。"""
+    uid, gid = _safe_uid_gid()
+    tools_path = os.path.join(_project_root, "tools")
+    cmd = [
+        "docker", "run",
+        "--init",
+        "--dns", "172.17.0.1",
+        "--volume", f"{host_code_path}:/app",
+        "--volume", f"{tools_path}:/app/tools",
+        "-e", f"HOST_UID={uid}",
+        "-e", f"HOST_GID={gid}",
+        "--privileged",
+        "-itd",
+        "--name", name, image, "/bin/bash",
+    ]
+    cp = run(cmd)
+    if cp.returncode != 0:
+        log(f"FATAL: 创建容器失败: {name} -> {cp.stderr.strip()}", container=name)
+        sys.exit(2)
+    log(f"created container: {name}", container=name)
+
+
+def start_container(name: str) -> None:
+    """启动一个已停止的 Docker 容器。"""
+    cp = run(["docker", "start", name])
+    if cp.returncode != 0:
+        log(f"FATAL: 启动容器失败: {name} -> {cp.stderr.strip()}", container=name)
+        sys.exit(2)
+    log(f"started container: {name}", container=name)
+
+
+def disable_offload_once(name: str) -> None:
+    """在容器内关闭网卡 TSO/GSO/GRO（仅执行一次），提高流量采集精度。"""
+    shell = r'''
+        if [ -f /tmp/.offload_disabled ]; then
+            exit 0
+        fi
+        if command -v sudo >/dev/null 2>&1; then
+            sudo ethtool -K eth0 tso off gso off gro off
+        else
+            ethtool -K eth0 tso off gso off gro off
+        fi
+        rc=$?
+        if [ $rc -eq 0 ]; then
+            touch /tmp/.offload_disabled
+        fi
+        exit $rc
+    '''
+    cp = run(["docker", "exec", name, "sh", "-lc", shell])
+    if cp.returncode == 0:
+        log(f"{name}: offload disabled (TSO/GSO/GRO off)", container=name)
+    else:
+        msg = (cp.stderr or cp.stdout).strip()
+        log(f"WARN: {name}: 关闭包合并失败：{msg if msg else 'unknown error'}", container=name)
+
+
+def build_container_names(prefix: str, count: int) -> List[str]:
+    """根据前缀和数量生成容器名称列表。"""
+    return [f"{prefix}{i}" for i in range(count)]
+
+
+def prepare_pool_once() -> List[str]:
+    """一次性初始化 Docker 容器池：并发创建/启动容器，关闭网卡 offload。"""
+    ensure_docker_available()
+
+    host_code = Path(HOST_CODE_PATH)
+    if not host_code.exists():
+        log(f"WARN: 宿主机代码目录不存在：{host_code}，仍会尝试挂载。")
+    if not host_code.is_absolute():
+        log(f"WARN: 建议使用绝对路径挂载，当前={host_code}")
+
+    names = build_container_names(CONTAINER_PREFIX, CONTAINER_COUNT)
+    log(f"容器池规模={len(names)}: {names[0]} … {names[-1]}")
+
+    created: List[str] = []
+    created_lock = threading.Lock()
+
+    def check_and_create(name: str) -> None:
+        exists = container_exists(name)
+        if exists is None:
+            create_container(name, str(host_code), DOCKER_IMAGE)
+            with created_lock:
+                created.append(name)
+
+    with ThreadPoolExecutor(max_workers=min(len(names), 20)) as pool:
+        pool.map(check_and_create, names)
+
+    for n in names:
+        if not container_running(n):
+            start_container(n)
+
+    time.sleep(5)
+    for n in created:
+        disable_offload_once(n)
+
+    return names
+
+
+def remove_containers() -> None:
+    """删除所有以 CONTAINER_PREFIX 为前缀的 Docker 容器。"""
+    subprocess.run(
+        f'docker ps -aq -f "name=^{CONTAINER_PREFIX}" | xargs -r docker rm -f',
+        shell=True,
+        check=False
+    )
+
+
+
+
+def normalize_domain(value: str) -> str:
+    """将输入标准化为纯域名（补协议前缀 → urlparse → 提取 hostname → 小写）。"""
+    text = (value or "").strip()
+    if not text:
+        return ""
+    if "://" not in text:
+        text = "https://" + text
+    parsed = urlparse(text)
+    return (parsed.hostname or "").strip().lower().strip(".")
+
+
+def normalize_seed_url(value: str) -> str:
+    """将输入标准化为完整种子 URL（已有合法 URL 直接返回，否则拼接 https://）。"""
+    text = (value or "").strip()
+    if not text:
+        return ""
+    if "://" in text:
         parsed = urlparse(text)
-        host = (parsed.hostname or "").strip().lower().strip(".")
-        return host
+        if parsed.scheme.lower() in ("http", "https") and parsed.netloc:
+            return text
+    domain = normalize_domain(text)
+    if not domain:
+        return ""
+    return f"https://{domain}"
 
-    def _normalize_seed_url(self, value: str) -> str:
-        text = (value or "").strip()
-        if not text:
-            return ""
-        if "://" in text:
-            parsed = urlparse(text)
-            if parsed.scheme.lower() in ("http", "https") and parsed.netloc:
-                return text
-        domain = self._normalize_domain(text)
-        if not domain:
-            return ""
-        return f"https://{domain}"
 
-    def _domain_output_csv(self, domain: str) -> str:
-        return os.path.join(self.OUTPUT_BASE_DIR, domain, "url_list.csv")
+def domain_output_csv(domain: str) -> str:
+    """根据域名生成输出 CSV 路径：{OUTPUT_BASE_DIR}/{domain}/url_list.csv。"""
+    return os.path.join(OUTPUT_BASE_DIR, domain, "url_list.csv")
 
-    def _read_source_jobs(self) -> List[Dict[str, str]]:
-        p = Path(self.SOURCE_CSV)
-        if not p.exists():
-            self.log(f"WARN: 源 CSV 不存在: {self.SOURCE_CSV}")
-            return []
 
-        jobs: List[Dict[str, str]] = []
-        seen_domains: Set[str] = set()
+def append_rows(csv_path: str, header: List[str], rows: List[Dict[str, str]]) -> None:
+    """追加写入 CSV，文件不存在或为空时自动写入表头。"""
+    if not rows:
+        return
+    p = Path(csv_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    need_header = (not p.exists()) or p.stat().st_size == 0
+    with p.open("a", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=header)
+        if need_header:
+            writer.writeheader()
+        writer.writerows(rows)
 
-        with p.open("r", encoding="utf-8-sig", newline="") as f:
-            reader = csv.reader(f)
-            for line_no, row in enumerate(reader, start=1):
-                if not row:
-                    continue
 
-                first = (row[0] or "").strip()
-                second = (row[1] or "").strip() if len(row) > 1 else ""
+def read_source_jobs() -> List[Dict[str, Any]]:
+    """从源 CSV 读取任务列表，支持单列/双列格式，自动跳过表头和去重。"""
+    p = Path(SOURCE_CSV)
+    if not p.exists():
+        log(f"WARN: 源 CSV 不存在: {SOURCE_CSV}")
+        return []
 
-                if line_no == 1 and first.lower() in ("id", "rank", "index"):
-                    continue
+    jobs: List[Dict[str, Any]] = []
+    seen_domains: Set[str] = set()
 
-                raw_site = second if second else first
-                domain = self._normalize_domain(raw_site)
-                if not domain or domain in seen_domains:
-                    continue
-                seen_domains.add(domain)
-
-                row_id = first if first and first.lower() not in ("id", "rank", "index") else str(len(jobs) + 1)
-                seed_url = self._normalize_seed_url(raw_site)
-                if not seed_url:
-                    continue
-
-                jobs.append(
-                    {
-                        "row_id": row_id,
-                        "url": seed_url,
-                        "domain": domain,
-                        "target_count": str(self.TARGET_URLS_PER_DOMAIN),
-                    }
-                )
-
-        return jobs
-
-    def _load_existing_output(self) -> None:
-        jobs = self._read_source_jobs()
-        if not jobs:
-            return
-
-        for job in jobs:
-            domain = self._normalize_domain(job.get("domain", ""))
-            if not domain:
+    with p.open("r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.reader(f)
+        for line_no, row in enumerate(reader, start=1):
+            if not row:
                 continue
 
-            p = Path(self._domain_output_csv(domain))
-            if not p.exists():
+            first = (row[0] or "").strip()
+            second = (row[1] or "").strip() if len(row) > 1 else ""
+
+            # 跳过表头行
+            if line_no == 1 and first.lower() in ("id", "rank", "index"):
                 continue
 
-            try:
-                with p.open("r", encoding="utf-8-sig", newline="") as f:
-                    reader = csv.DictReader(f)
-                    if reader.fieldnames is None:
-                        continue
-
-                    for row in reader:
-                        url = (row.get("url", "") or "").strip()
-                        if not url:
-                            continue
-                        row_domain = self._normalize_domain(row.get("domain", "")) or domain
-                        if row_domain != domain:
-                            continue
-                        self._domain_url_set.setdefault(domain, set()).add(url)
-            except Exception as e:
-                self.log(f"WARN: 读取历史输出失败 {p}: {e}")
-
-        self.log(
-            f"已加载历史输出: domains={len(self._domain_url_set)}, "
-            f"urls={sum(len(v) for v in self._domain_url_set.values())}"
-        )
-
-    def _append_rows(self, csv_path: str, header: List[str], rows: List[Dict[str, str]]) -> None:
-        if not rows:
-            return
-        p = Path(csv_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        need_header = (not p.exists()) or p.stat().st_size == 0
-
-        with p.open("a", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=header)
-            if need_header:
-                writer.writeheader()
-            writer.writerows(rows)
-
-    def fetch_jobs(self) -> List[Dict[str, str]]:
-        """读取待抓取站点，仅返回未达到目标 URL 数的 domain。"""
-        if not self._has_jobs:
-            return []
-
-        source_jobs = self._read_source_jobs()
-        pending = []
-        for job in source_jobs:
-            domain = job.get("domain", "")
-            exist_count = len(self._domain_url_set.get(domain, set()))
-            if exist_count >= self.TARGET_URLS_PER_DOMAIN:
+            raw_site = second if second else first
+            domain = normalize_domain(raw_site)
+            if not domain or domain in seen_domains:
                 continue
-            pending.append(job)
+            seen_domains.add(domain)
 
-        self._has_jobs = False
-        self.log(
-            f"源站点={len(source_jobs)}, 待处理={len(pending)}, "
-            f"目标每站点={self.TARGET_URLS_PER_DOMAIN} URL"
-        )
-        return pending
-
-    def process_result(self, task: Dict[str, str], container: str):
-        """处理 action 输出，增量写入每个 domain 独立的 url_list.csv。"""
-        meta_path = os.path.join(self.HOST_CODE_PATH, "meta", f"{container}_last.json")
-        try:
-            with open(meta_path, "r", encoding="utf-8") as f:
-                result = json.load(f)
-        except Exception as e:
-            return False, f"meta read error: {e}"
-
-        domain = self._normalize_domain(task.get("domain", "")) or self._normalize_domain(result.get("domain", ""))
-        if not domain:
-            return False, "invalid domain in task/result"
-
-        raw_urls = result.get("collected_urls", [])
-        if not isinstance(raw_urls, list):
-            raw_urls = []
-
-        unique_urls = []
-        seen = set()
-        for item in raw_urls:
-            if not isinstance(item, str):
+            row_id = first if first and first.lower() not in ("id", "rank", "index") else str(len(jobs) + 1)
+            seed_url = normalize_seed_url(raw_site)
+            if not seed_url:
                 continue
-            u = item.strip()
-            if not u or u in seen:
-                continue
-            seen.add(u)
-            unique_urls.append(u)
 
-        with self._output_lock:
-            existing_set = self._domain_url_set.setdefault(domain, set())
-            new_rows = []
-
-            for u in unique_urls:
-                if len(existing_set) >= self.TARGET_URLS_PER_DOMAIN:
-                    break
-                if u in existing_set:
-                    continue
-                existing_set.add(u)
-                next_id = len(existing_set)
-                new_rows.append({"id": str(next_id), "url": u, "domain": domain})
-            if new_rows:
-                self._append_rows(self._domain_output_csv(domain), self.OUTPUT_HEADER, new_rows)
-
-            total = len(existing_set)
-
-        self.log(f"{domain}: 新增 {len(new_rows)} 条，累计 {total}/{self.TARGET_URLS_PER_DOMAIN}")
-
-        if total >= self.TARGET_URLS_PER_DOMAIN:
-            return True, ""
-
-        err = result.get("error", "")
-        if err:
-            return False, f"insufficient urls: {total}/{self.TARGET_URLS_PER_DOMAIN}; error={err}"
-        return False, f"insufficient urls: {total}/{self.TARGET_URLS_PER_DOMAIN}"
-
-    def on_task_failed(self, task: Dict[str, str], error: str) -> None:
-        """记录最终失败的 domain（保留已抓取的部分结果）。"""
-        domain = self._normalize_domain(task.get("domain", ""))
-        with self._failed_lock:
-            rows = [
+            jobs.append(
                 {
-                    "seed_id": task.get("row_id", ""),
-                    "seed_url": task.get("url", ""),
+                    "row_id": row_id,
+                    "url": seed_url,
                     "domain": domain,
-                    "collected_count": str(len(self._domain_url_set.get(domain, set()))),
-                    "error": (error or "")[:500],
                 }
-            ]
-            self._append_rows(self.FAILED_CSV, self.FAILED_HEADER, rows)
+            )
 
-    def should_continue(self) -> bool:
-        return False
+    return jobs
 
-    def cleanup(self) -> None:
-        self.remove_containers()
+
+def load_existing_output() -> None:
+    """加载历史已采集的 URL 到内存 _domain_url_set，实现断点续传。"""
+    jobs = read_source_jobs()
+    if not jobs:
+        return
+
+    for job in jobs:
+        domain = normalize_domain(job.get("domain", ""))
+        if not domain:
+            continue
+
+        p = Path(domain_output_csv(domain))
+        if not p.exists():
+            continue
+
+        try:
+            with p.open("r", encoding="utf-8-sig", newline="") as f:
+                reader = csv.DictReader(f)
+                if reader.fieldnames is None:
+                    continue
+                for row in reader:
+                    url = (row.get("url", "") or "").strip()
+                    if not url:
+                        continue
+                    row_domain = normalize_domain(row.get("domain", "")) or domain
+                    if row_domain != domain:
+                        continue
+                    _domain_url_set.setdefault(domain, set()).add(url)
+        except Exception as e:
+            log(f"WARN: 读取历史输出失败 {p}: {e}")
+
+    log(
+        f"已加载历史输出: domains={len(_domain_url_set)}, "
+        f"urls={sum(len(v) for v in _domain_url_set.values())}"
+    )
+
+
+def fetch_jobs() -> List[Dict[str, Any]]:
+    """读取源任务并过滤掉已达标域名，返回待处理任务列表。"""
+    source_jobs = read_source_jobs()
+    pending: List[Dict[str, Any]] = []
+    for job in source_jobs:
+        domain = job.get("domain", "")
+        exist_count = len(_domain_url_set.get(domain, set()))
+        if exist_count >= TARGET_URLS_PER_DOMAIN:
+            continue
+        pending.append(job)
+
+    log(
+        f"源站点={len(source_jobs)}, 待处理={len(pending)}, "
+        f"目标每站点={TARGET_URLS_PER_DOMAIN} URL"
+    )
+    return pending
+
+
+def process_result(task: Dict[str, Any], container: str) -> Tuple[bool, str]:
+    """处理爬虫结果：读取 meta JSON → 提取 URL → 去重 → 写入 CSV → 判断是否达标。"""
+    meta_path = os.path.join(HOST_CODE_PATH, "meta", f"{container}_last.json")
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            result = json.load(f)
+    except Exception as e:
+        return False, f"meta read error: {e}"
+
+    domain = normalize_domain(task.get("domain", "")) or normalize_domain(result.get("domain", ""))
+    if not domain:
+        return False, "invalid domain in task/result"
+
+    raw_urls = result.get("collected_urls", [])
+    if not isinstance(raw_urls, list):
+        raw_urls = []
+    visited_count = int(result.get("visited_count", 0) or 0)
+
+    # 对原始 URL 列表去重（保持顺序）
+    unique_urls: List[str] = []
+    seen = set()
+    for item in raw_urls:
+        if not isinstance(item, str):
+            continue
+        u = item.strip()
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        unique_urls.append(u)
+
+    # 线程安全地更新全局去重集合和输出文件
+    with _output_lock:
+        existing_set = _domain_url_set.setdefault(domain, set())
+        new_rows = []
+
+        for u in unique_urls:
+            if len(existing_set) >= TARGET_URLS_PER_DOMAIN:
+                break
+            if u in existing_set:
+                continue
+            existing_set.add(u)
+            next_id = len(existing_set)
+            new_rows.append({"id": str(next_id), "url": u, "domain": domain})
+
+        if new_rows:
+            append_rows(domain_output_csv(domain), OUTPUT_HEADER, new_rows)
+
+        total = len(existing_set)
+
+    log(f"{domain}: 新增 {len(new_rows)} 条，累计 {total}/{TARGET_URLS_PER_DOMAIN}", container=container)
+
+    if total >= TARGET_URLS_PER_DOMAIN:
+        return True, ""
+
+    err = result.get("error", "")
+    if err:
+        return False, f"insufficient urls: {total}/{TARGET_URLS_PER_DOMAIN}; visited={visited_count}; error={err}"
+    return False, f"insufficient urls: {total}/{TARGET_URLS_PER_DOMAIN}; visited={visited_count}"
+
+
+def on_task_failed(task: Dict[str, Any], error: str) -> None:
+    """重试耗尽后，将失败信息写入 FAILED_CSV。"""
+    domain = normalize_domain(task.get("domain", ""))
+    with _failed_lock:
+        rows = [
+            {
+                "seed_id": task.get("row_id", ""),
+                "seed_url": task.get("url", ""),
+                "domain": domain,
+                "collected_count": str(len(_domain_url_set.get(domain, set()))),
+                "error": (error or "")[:500],
+            }
+        ]
+        append_rows(FAILED_CSV, FAILED_HEADER, rows)
+
+
+def exec_once(task: Dict[str, Any]) -> Tuple[bool, str]:
+    """对单个任务执行一次 docker exec，成功则调用 process_result 解析结果。"""
+    container = task["container"]
+    payload = json.dumps(task, ensure_ascii=False)
+    cmd = [
+        "docker", "exec", container,
+        "python", "-u", "/app/action.py",
+        payload,
+    ]
+    log("执行命令", cmd, container=container)
+    cp = run(cmd, timeout=6000)
+    if cp.returncode == 0:
+        return process_result(task, container)
+    return False, (cp.stderr.strip() or cp.stdout.strip())
+
+
+def worker_loop(container: str, q: "queue.Queue[Dict[str, Any]]", stats: Dict[str, Any], retry: int) -> None:
+    """单个容器的工作循环：取任务 → 执行 → 成功计数 / 失败重试。"""
+    while True:
+        try:
+            task = q.get_nowait()
+        except queue.Empty:
+            return
+
+        row_id = task.get("row_id", "")
+        url = task.get("url", "")
+        task["container"] = container
+
+        attempt = int(task.get("_retry_count", 0) or 0)
+        if "_start_time" not in task:
+            task["_start_time"] = time.time()
+        task_start_time = float(task["_start_time"])
+
+        try:
+            if attempt == 0:
+                log(f"{container} -> start [{row_id}] {url}", container=container)
+            else:
+                log(f"{container} -> retry {attempt}/{retry} [{row_id}] {url}", container=container)
+
+            ok, err = exec_once(task)
+            if ok:
+                elapsed = time.time() - task_start_time
+                log(f"{container} -> done  [{row_id}] {url} ({elapsed:.1f}s)", container=container)
+                with _stats_lock:
+                    stats["ok"] += 1
+            else:
+                log(f"{container} -> fail  [{row_id}] {err[:200]}", container=container)
+                if attempt < retry:
+                    task["_retry_count"] = attempt + 1
+                    time.sleep(2)
+                    q.put(task)
+                else:
+                    with _stats_lock:
+                        stats["fail"] += 1
+                        stats["errors"].append((task, err))
+                    on_task_failed(task, err)
+
+        except subprocess.TimeoutExpired:
+            err = f"timeout>6000s"
+            log(f"{container} -> timeout [{row_id}] {url}", container=container)
+            if attempt < retry:
+                task["_retry_count"] = attempt + 1
+                time.sleep(2)
+                q.put(task)
+            else:
+                with _stats_lock:
+                    stats["fail"] += 1
+                    stats["errors"].append((task, err))
+                on_task_failed(task, err)
+
+        except Exception as e:
+            err = repr(e)
+            log(f"{container} -> error [{row_id}] {err}", container=container)
+            if attempt < retry:
+                task["_retry_count"] = attempt + 1
+                time.sleep(2)
+                q.put(task)
+            else:
+                with _stats_lock:
+                    stats["fail"] += 1
+                    stats["errors"].append((task, err))
+                on_task_failed(task, err)
+
+        finally:
+            q.task_done()
+
+
+def run_once(names: List[str], jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """执行一轮批量调度：任务入队 → 每容器一线程并发消费 → 返回统计。"""
+    q: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+    for task in jobs:
+        q.put(task)
+
+    stats: Dict[str, Any] = {"ok": 0, "fail": 0, "errors": []}
+    log(f"开始执行：jobs={len(jobs)}，并发容器={len(names)}，镜像={DOCKER_IMAGE}")
+
+    with ThreadPoolExecutor(max_workers=len(names)) as pool:
+        for n in names:
+            pool.submit(worker_loop, n, q, stats, RETRY)
+        q.join()
+
+    return stats
+
+
+def cleanup_host_code_dir() -> None:
+    """清理 url_list_collector 下的临时目录，保留 tools、trace_spider、utils。"""
+    base = Path(HOST_CODE_PATH)
+    if not base.exists() or not base.is_dir():
+        return
+    for entry in base.iterdir():
+        if entry.is_dir() and entry.name not in {"tools", "trace_spider", "utils"}:
+            try:
+                shutil.rmtree(entry)
+                log(f"删除子目录: {entry}")
+            except Exception as e:
+                log(f"WARN: 删除子目录失败: {entry} -> {e}")
+
+
+def sig(signum, _frame) -> None:
+    """信号处理：收到 SIGINT/SIGTERM 后刷新缓冲区并立即退出。"""
+    log(f"收到中断信号({signum})，立即退出。")
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    finally:
+        os._exit(128 + signum)
+
+
+def main() -> None:
+    """主入口：初始化容器池 → 加载历史 → 过滤任务 → 并发执行 → 清理。"""
+    signal.signal(signal.SIGINT, sig)
+    signal.signal(signal.SIGTERM, sig)
+
+    names = prepare_pool_once()
+    load_existing_output()
+    jobs = fetch_jobs()
+    if not jobs:
+        log("没有可处理的任务，退出。")
+        return
+
+    stats = run_once(names, jobs)
+    log(f"[summary] success={stats['ok']} fail={stats['fail']} total={len(jobs)}")
+    if stats["errors"]:
+        log("失败样例：")
+        for task, err in stats["errors"][:10]:
+            log(f" - id={task.get('row_id', '')} url={task.get('url', '')} err={str(err)[:200]}")
+
+    if CLEANUP_ON_EXIT:
+        cleanup_host_code_dir()
+        remove_containers()
+    else:
+        log("按配置跳过退出清理：保留 docker 容器和 url_list_collector 子目录。")
 
 
 if __name__ == "__main__":
-    URLListIngestor.main()
+    remove_containers()
+    main()
