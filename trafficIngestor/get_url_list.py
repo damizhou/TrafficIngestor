@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
+from tqdm import tqdm
 
 # 添加项目根目录到路径
 # 当前脚本所在目录的绝对路径（trafficIngestor/）
@@ -86,14 +87,41 @@ _stats_lock = threading.Lock()
 _output_lock = threading.Lock()
 # 保护失败记录 CSV 写入的线程锁
 _failed_lock = threading.Lock()
+# 保护进度条对象的线程锁
+_pbar_lock = threading.Lock()
 # 全局域名→已采集URL集合的映射，用于去重和断点续传
 _domain_url_set: Dict[str, Set[str]] = {}
+_pbar: Optional[tqdm] = None
 
 
 def log(*a, container: Optional[str] = None) -> None:
     """带时间戳的日志输出。"""
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{ts}]", *a, flush=True)
+    msg = f"[{ts}] " + " ".join(str(x) for x in a)
+    with _pbar_lock:
+        if _pbar is not None:
+            tqdm.write(msg)
+        else:
+            print(msg, flush=True)
+
+
+def _update_progress(stats: Dict[str, Any]) -> None:
+    """更新全局进度条描述和进度。"""
+    with _pbar_lock:
+        if _pbar is None:
+            return
+        total_done = int(stats.get("ok", 0)) + int(stats.get("fail", 0))
+        start_time = float(stats.get("start_time", time.time()))
+        container_count = int(stats.get("container_count", 1)) or 1
+        elapsed = time.time() - start_time
+        elapsed_min = elapsed / 60.0 if elapsed > 0 else 0.0
+        per_min = (total_done / elapsed_min) if elapsed_min > 0 else 0.0
+        avg_time = (elapsed * container_count / total_done) if total_done > 0 else 0.0
+        _pbar.set_description(
+            f"任务进度: {total_done}个 [运行: {elapsed_min:.1f}分钟 | 成功: {stats['ok']} | "
+            f"失败: {stats['fail']} | 每分钟: {per_min:.2f} | 平均耗时: {avg_time:.1f}秒]"
+        )
+        _pbar.update(1)
 
 
 def run(cmd: List[str], timeout: Optional[int] = None) -> subprocess.CompletedProcess:
@@ -572,6 +600,7 @@ def worker_loop(container: str, q: "queue.Queue[Dict[str, Any]]", stats: Dict[st
                 log(f"{container} -> done  [{row_id}] {url} ({elapsed:.1f}s)", container=container)
                 with _stats_lock:
                     stats["ok"] += 1
+                    _update_progress(stats)
             else:
                 log(f"{container} -> fail  [{row_id}] {err[:200]}", container=container)
                 if attempt < retry:
@@ -582,6 +611,7 @@ def worker_loop(container: str, q: "queue.Queue[Dict[str, Any]]", stats: Dict[st
                     with _stats_lock:
                         stats["fail"] += 1
                         stats["errors"].append((task, err))
+                        _update_progress(stats)
                     on_task_failed(task, err)
 
         except subprocess.TimeoutExpired:
@@ -595,6 +625,7 @@ def worker_loop(container: str, q: "queue.Queue[Dict[str, Any]]", stats: Dict[st
                 with _stats_lock:
                     stats["fail"] += 1
                     stats["errors"].append((task, err))
+                    _update_progress(stats)
                 on_task_failed(task, err)
 
         except Exception as e:
@@ -608,6 +639,7 @@ def worker_loop(container: str, q: "queue.Queue[Dict[str, Any]]", stats: Dict[st
                 with _stats_lock:
                     stats["fail"] += 1
                     stats["errors"].append((task, err))
+                    _update_progress(stats)
                 on_task_failed(task, err)
 
         finally:
@@ -616,20 +648,34 @@ def worker_loop(container: str, q: "queue.Queue[Dict[str, Any]]", stats: Dict[st
 
 def run_once(names: List[str], jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
     """执行一轮批量调度：任务入队 → 每容器一线程并发消费 → 返回统计。"""
+    global _pbar
     q: "queue.Queue[Dict[str, Any]]" = queue.Queue()
     for task in jobs:
         q.put(task)
 
-    stats: Dict[str, Any] = {"ok": 0, "fail": 0, "errors": []}
+    stats: Dict[str, Any] = {
+        "ok": 0,
+        "fail": 0,
+        "errors": [],
+        "start_time": time.time(),
+        "container_count": max(len(names), 1),
+    }
     log(f"开始执行：jobs={len(jobs)}，并发容器={len(names)}，镜像={DOCKER_IMAGE}")
 
-    with ThreadPoolExecutor(max_workers=len(names)) as pool:
-        futures = []
-        for n in names:
-            futures.append(pool.submit(worker_loop, n, q, stats, RETRY))
-        q.join()
-        for fut in futures:
-            fut.result()
+    with tqdm(total=len(jobs), desc="任务进度", leave=True) as pbar:
+        with _pbar_lock:
+            _pbar = pbar
+        try:
+            with ThreadPoolExecutor(max_workers=len(names)) as pool:
+                futures = []
+                for n in names:
+                    futures.append(pool.submit(worker_loop, n, q, stats, RETRY))
+                q.join()
+                for fut in futures:
+                    fut.result()
+        finally:
+            with _pbar_lock:
+                _pbar = None
 
     return stats
 
