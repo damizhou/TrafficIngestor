@@ -31,14 +31,21 @@ _project_root = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+
+def get_real_username() -> str:
+    """获取真实用户名，即使在 sudo 下也能获取原始用户"""
+    return os.environ.get('SUDO_USER') or os.environ.get('USER') or os.getlogin()
+
+
 # ============== 配置 ==============
 CODE_BASE_PATH = _project_root  # 使用相对路径
 CSV_PATH = "collected_request_urls_all.csv"
-CONTAINER_PREFIX = "batch_traffic_batch"
+BASE_NAME = 'batch_traffice_capture'
+CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
 CONTAINER_COUNT = 19 * 5                       # 容器数量
 DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
 CONTAINER_CODE_PATH = "/app"
-HOST_CODE_PATH = os.path.join(_project_root, 'batch_traffice_capture')  # 使用相对路径
+HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)  # 使用相对路径
 DASE_DST = '/netdisk/dataset/ablation_study/batch'  # 外部存储路径，保持绝对路径
 # =================================
 CREATE_WITH_TTY = True

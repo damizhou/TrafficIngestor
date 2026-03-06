@@ -44,12 +44,13 @@ def get_real_username() -> str:
 # ============== 配置 ==============
 CODE_BASE_PATH = _project_root  # 使用相对路径
 CSV_PATH = os.path.join(_current_dir, 'urls_combined.csv')  # 使用相对路径
-CONTAINER_PREFIX = f"{get_real_username()}_traffic_receiver"
+BASE_NAME = 'single_traffice_capture'
+CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
 CONTAINER_COUNT = 3                    # 容器数量
 DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
 # DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"
 CONTAINER_CODE_PATH = "/app"
-HOST_CODE_PATH = os.path.join(_project_root, 'single_traffice_capture')  # 使用相对路径
+HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)  # 使用相对路径
 DASE_DST = '/netdisk/traffic_receiver'  # 外部存储路径，保持绝对路径
 # =================================
 CREATE_WITH_TTY = True            # 创建容器时加 -itd

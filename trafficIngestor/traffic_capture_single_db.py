@@ -80,14 +80,15 @@ class _DailyErrorLogWriter:
                 self._fp = None
 
 
-class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
+class TrafficIngestor(BaseTrafficIngestor):
     """新闻流量采集器"""
 
     # ============== 配置 ==============
-    CONTAINER_PREFIX = f"{get_real_username()}_traffic_capture_single_db"
+    BASE_NAME = 'traffic_capture_single_db'
+    CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     # 默认并发不宜过高；可通过环境变量覆盖（例如 180）
-    CONTAINER_COUNT = 15 * 20
-    HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_db')
+    CONTAINER_COUNT = 15 * 10
+    HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
     BASE_DST = '/netdisk/news_receiver'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
@@ -320,4 +321,4 @@ class NewsReceiverTrafficIngestor(BaseTrafficIngestor):
 
 
 if __name__ == "__main__":
-    NewsReceiverTrafficIngestor.main()
+    TrafficIngestor.main()

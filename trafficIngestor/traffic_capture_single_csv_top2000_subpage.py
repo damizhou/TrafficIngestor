@@ -23,11 +23,11 @@ class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
 
     # ============== 配置 ==============
-    BASE_NAME = 'traffic_capture_single_csv'
+    BASE_NAME = 'traffic_capture_single_csv_top2000_subpage'
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-    BASE_DST = '/netdisk/ww/top200000'
+    BASE_DST = '/netdisk/ww/top2000/subpages_merged.csv'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 
@@ -38,7 +38,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # 示例：
     # id,url,domain
     # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'top300000_ingestor.csv')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'subpages_merged.csv')
 
     def __init__(self):
         super().__init__()

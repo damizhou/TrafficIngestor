@@ -19,14 +19,15 @@ if _project_root not in sys.path:
 from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor, get_real_username
 
 
-class XTrafficIngestor(BaseTrafficIngestor):
-    """X(Twitter) 流量采集器"""
+class TrafficIngestor(BaseTrafficIngestor):
+    """流量采集器"""
 
     # ============== 配置 ==============
-    CONTAINER_PREFIX = f"{get_real_username()}_traffic_capture_single_csv_top2000"
-    CONTAINER_COUNT = 15 * 20
-    HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_top2000')
-    BASE_DST = '/netdisk/ww/top2000/homepage_only'
+    BASE_NAME = 'traffic_capture_single_csv_wiki'
+    CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
+    CONTAINER_COUNT = 15 * 10
+    HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
+    BASE_DST = '/netdisk/ww/wiki/0306/chrome'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 
@@ -37,7 +38,7 @@ class XTrafficIngestor(BaseTrafficIngestor):
     # 示例：
     # id,url,domain
     # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'top2000_ingestor.csv')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'wiki.csv')
 
     def __init__(self):
         super().__init__()
@@ -83,4 +84,4 @@ class XTrafficIngestor(BaseTrafficIngestor):
 
 
 if __name__ == "__main__":
-    XTrafficIngestor.main()
+    TrafficIngestor.main()

@@ -291,7 +291,7 @@ class BaseTrafficIngestor(ABC):
 
             def get_case_insensitive(row: Dict[str, str], key: str) -> str:
                 for k, v in row.items():
-                    if k.lower() == key:
+                    if isinstance(k, str) and k.lower() == key:
                         return (v or "").strip()
                 return ""
 
@@ -326,7 +326,7 @@ class BaseTrafficIngestor(ABC):
 
             def get_id(row: Dict[str, str]) -> str:
                 for k, v in row.items():
-                    if k.lower() == "id":
+                    if isinstance(k, str) and k.lower() == "id":
                         return (v or "").strip()
                 return ""
 
@@ -345,7 +345,7 @@ class BaseTrafficIngestor(ABC):
             tmp_fd, tmp_path = tempfile.mkstemp(dir=p.parent, suffix=".tmp", prefix=".csv_")
             try:
                 with os.fdopen(tmp_fd, "w", encoding="utf-8-sig", newline="") as f:
-                    writer = csv.DictWriter(f, fieldnames=header_fields)
+                    writer = csv.DictWriter(f, fieldnames=header_fields, extrasaction="ignore")
                     writer.writeheader()
                     writer.writerows(remaining_rows)
                 os.replace(tmp_path, csv_path)

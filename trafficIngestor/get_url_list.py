@@ -51,12 +51,14 @@ def get_real_username() -> str:
 
 # ============== 配置 ==============
 
-# Docker 容器名前缀，格式为 "{用户名}_get_url_list"
-CONTAINER_PREFIX = f"{get_real_username()}_get_url_list"
+# 容器与挂载目录的基础名称
+BASE_NAME = "url_list_collector"
+# Docker 容器名前缀，格式为 "{用户名}_{BASE_NAME}"
+CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
 # Docker 容器池的容器数量
 CONTAINER_COUNT = 400
 # 宿主机上 url_list_collector 代码目录的绝对路径，会被挂载到容器内 /app
-HOST_CODE_PATH = os.path.join(_project_root, "url_list_collector")
+HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
 # 爬虫使用的 Docker 镜像名称
 DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
 # 任务失败后的最大重试次数
@@ -83,6 +85,7 @@ FAILED_HEADER = ["seed_id", "seed_url", "domain", "collected_count", "error"]
 
 # 保护统计计数器（stats dict）的线程锁
 _stats_lock = threading.Lock()
+
 # 保护输出文件写入和 _domain_url_set 更新的线程锁
 _output_lock = threading.Lock()
 # 保护失败记录 CSV 写入的线程锁
