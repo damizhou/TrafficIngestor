@@ -218,6 +218,8 @@ def open_url_and_save_content(driver, url, ssl_key_file_path, logger=None, data_
     Returns:
         content_path: 文本内容文件路径
         html_path: HTML文件路径
+        screenshot_path: 截图文件路径
+        current_url: 重定向后的真实URL
     """
     if data_base_dir is None:
         data_base_dir = _project_root
@@ -234,6 +236,7 @@ def open_url_and_save_content(driver, url, ssl_key_file_path, logger=None, data_
 
     content_path = ssl_key_file_path.replace("_ssl_key.log", ".text").replace("/ssl_key/", "/content/")
     html_path = ssl_key_file_path.replace("_ssl_key.log", ".html").replace("/ssl_key/", "/html/")
+    screenshot_path = ssl_key_file_path.replace("_ssl_key.log", ".png").replace("/ssl_key/", "/screenshot/")
 
     os.makedirs(os.path.dirname(content_path), exist_ok=True)
     with open(content_path, "w", encoding="utf-8") as f:
@@ -244,13 +247,13 @@ def open_url_and_save_content(driver, url, ssl_key_file_path, logger=None, data_
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html)
 
+    os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
+    driver.save_screenshot(screenshot_path)
+
+    current_url = driver.current_url
+
     if logger:
         logger.info(f"爬取数据结束, 等待10秒.让浏览器加载完所有已请求的页面")
     time.sleep(10)
 
-    kill_firefox_processes()
-    if logger:
-        logger.info(f"等待TCP结束挥手完成，耗时60秒")
-    time.sleep(60)
-
-    return content_path, html_path
+    return content_path, html_path, screenshot_path, current_url

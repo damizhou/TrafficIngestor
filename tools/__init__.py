@@ -12,6 +12,7 @@ project_path = os.path.dirname(
 # 导出公共模块
 from .logger import setup_logging, get_logger
 from .chrome import create_chrome_driver, open_url_and_save_content, screenshot_full_page, kill_chrome_processes
+from .edge import create_edge_driver, kill_edge_processes
 from .firefox import create_firefox_driver, kill_firefox_processes
 from .capture import capture, stop_capture
 from .base_action import BaseAction

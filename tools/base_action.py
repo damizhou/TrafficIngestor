@@ -30,6 +30,7 @@ class BaseAction(ABC):
     # 默认阈值，子类可覆盖
     pcap_lowest_size = 100000
     ssl_key_lowest_size = 1000
+    browser_name = "Chrome"
 
     def __init__(self):
         self.allowed_domain = ""
@@ -53,6 +54,24 @@ class BaseAction(ABC):
     def traffic(self, index=0, formatted_time=None):
         """启动流量捕获"""
         capture(self.allowed_domain, formatted_time, f"{index}", data_base_dir=_project_root)
+
+    def kill_browser_processes(self):
+        """清理浏览器进程，子类可覆盖为其他浏览器实现。"""
+        kill_chrome_processes()
+
+    def create_browser_driver(self, formatted_time, row_id):
+        """创建浏览器驱动，子类可覆盖。"""
+        return create_chrome_driver(
+            self.allowed_domain, formatted_time, f"{row_id}",
+            data_base_dir=_project_root
+        )
+
+    def open_and_save_content(self, browser, url, ssl_key_file_path):
+        """打开页面并保存内容，子类可覆盖。"""
+        return open_url_and_save_content(
+            browser, url, ssl_key_file_path,
+            data_base_dir=_project_root
+        )
 
     def clean_old_files(self, meta_path):
         """清理旧文件"""
@@ -163,7 +182,7 @@ class BaseAction(ABC):
         self.clean_old_files(meta_path)
 
         formatted_time = datetime.now().strftime("%Y%m%d_%H_%M_%S")
-        kill_chrome_processes()
+        self.kill_browser_processes()
         kill_tcpdump_processes()
         time.sleep(1)
 
@@ -183,17 +202,13 @@ class BaseAction(ABC):
         traffic_thread.start()
         time.sleep(1)
 
-        self.logger.info(f"创建浏览器")
-        browser, ssl_key_file_path = create_chrome_driver(
-            self.allowed_domain, formatted_time, f"{row_id}",
-            data_base_dir=_project_root
-        )
+        self.logger.info(f"创建{self.browser_name}浏览器")
+        browser, ssl_key_file_path = self.create_browser_driver(formatted_time, row_id)
 
         self.logger.info(f"开始访问第{row_id}的词条：{url}")
         try:
-            content_path, html_path, screenshot_path, current_url = open_url_and_save_content(
-                browser, url, ssl_key_file_path,
-                data_base_dir=_project_root
+            content_path, html_path, screenshot_path, current_url = self.open_and_save_content(
+                browser, url, ssl_key_file_path
             )
         except Exception as e:
             open_url_error = repr(e).replace("\n", " ")
@@ -205,7 +220,7 @@ class BaseAction(ABC):
             self.logger.warning(f"browser.quit() 异常: {e}")
 
         self.logger.info("清理浏览器进程(兜底)")
-        kill_chrome_processes()
+        self.kill_browser_processes()
 
         self.logger.info(f"等待TCP结束挥手完成，耗时60秒")
         time.sleep(60)
