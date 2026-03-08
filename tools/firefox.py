@@ -144,8 +144,11 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
     opts.set_preference("network.http.altsvc.enabled", False)
     opts.set_preference("network.trr.mode", 5)  # 禁 DoH
     opts.set_preference("network.trr.uri", "")
+    opts.set_preference("security.OCSP.enabled", 0)
 
     # --- 降噪：遥测/实验/上报 ---
+    opts.set_preference("app.update.enabled", False)
+    opts.set_preference("app.update.auto", False)
     opts.set_preference("toolkit.telemetry.unified", False)
     opts.set_preference("toolkit.telemetry.enabled", False)
     opts.set_preference("toolkit.telemetry.server", "")
@@ -157,6 +160,10 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
     opts.set_preference("app.normandy.enabled", False)
     opts.set_preference("app.normandy.api_url", "")
     opts.set_preference("app.shield.optoutstudies.enabled", False)
+    opts.set_preference("browser.discovery.enabled", False)
+    opts.set_preference("browser.ping-centre.telemetry", False)
+    opts.set_preference("browser.region.network.url", "")
+    opts.set_preference("browser.region.update.enabled", False)
 
     # --- 连通性/门户探测 ---
     opts.set_preference("network.connectivity-service.enabled", False)
@@ -165,9 +172,11 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
     # --- 预取/预连接/预测 ---
     opts.set_preference("network.prefetch-next", False)
     opts.set_preference("network.dns.disablePrefetch", True)
+    opts.set_preference("network.dns.disablePrefetchFromHTTPS", True)
     opts.set_preference("network.predictor.enabled", False)
     opts.set_preference("network.predictor.enable-prefetch", False)
     opts.set_preference("network.http.speculative-parallel-limit", 0)
+    opts.set_preference("browser.urlbar.speculativeConnect.enabled", False)
 
     # --- Remote Settings ---
     opts.set_preference("services.settings.enabled", False)
@@ -177,16 +186,39 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
     opts.set_preference("security.remote_settings.intermediates.enabled", False)
     opts.set_preference("services.blocklist.update_enabled", False)
     opts.set_preference("extensions.blocklist.enabled", False)
+    opts.set_preference("extensions.getAddons.cache.enabled", False)
+    opts.set_preference("extensions.systemAddon.update.enabled", False)
+    opts.set_preference("extensions.update.autoUpdateDefault", False)
+    opts.set_preference("extensions.update.enabled", False)
+    opts.set_preference("extensions.webservice.discoverURL", "http://127.0.0.1:65535")
+    opts.set_preference("media.gmp-gmpopenh264.autoupdate", False)
+    opts.set_preference("media.gmp-manager.updateEnabled", False)
+    opts.set_preference("media.gmp-manager.url", "http://127.0.0.1:65535")
+    opts.set_preference("media.gmp-provider.enabled", False)
 
     # --- 新标签页/首页外呼 ---
     opts.set_preference("browser.newtabpage.activity-stream.feeds.system.topstories", False)
+    opts.set_preference("browser.newtabpage.activity-stream.feeds.snippets", False)
     opts.set_preference("browser.newtabpage.activity-stream.showSponsored", False)
     opts.set_preference("browser.newtabpage.activity-stream.showSponsoredTopSites", False)
+    opts.set_preference("browser.newtabpage.activity-stream.telemetry", False)
     opts.set_preference("extensions.pocket.enabled", False)
     opts.set_preference("browser.newtabpage.enabled", False)
     opts.set_preference("browser.startup.page", 0)
     opts.set_preference("browser.startup.homepage", "about:blank")
     opts.set_preference("browser.shell.checkDefaultBrowser", False)
+    opts.set_preference("browser.aboutHomeSnippets.updateUrl", "")
+
+    # --- 搜索 / SafeBrowsing / 定位 ---
+    opts.set_preference("browser.safebrowsing.downloads.enabled", False)
+    opts.set_preference("browser.safebrowsing.downloads.remote.enabled", False)
+    opts.set_preference("browser.safebrowsing.malware.enabled", False)
+    opts.set_preference("browser.safebrowsing.phishing.enabled", False)
+    opts.set_preference("browser.search.suggest.enabled", False)
+    opts.set_preference("browser.urlbar.quicksuggest.enabled", False)
+    opts.set_preference("browser.urlbar.suggest.searches", False)
+    opts.set_preference("geo.enabled", False)
+    opts.set_preference("geo.provider.network.url", "")
 
     # --- 语言 & 下载 ---
     opts.set_preference("intl.accept_languages", _ACCEPT_LANGUAGE)

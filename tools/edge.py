@@ -19,7 +19,6 @@ if _project_root not in sys.path:
 
 from tools.chrome import (
     add_cookies,
-    is_docker,
     open_url_and_save_content,
     screenshot_full_page,
 )
@@ -48,14 +47,12 @@ def _resolve_edge_binary():
     """查找 Edge 浏览器二进制路径。"""
     return _resolve_from_candidates(
         env_keys=("EDGE_BINARY", "MSEDGE_BINARY"),
-        executable_names=("msedge.exe", "microsoft-edge", "microsoft-edge-stable", "msedge"),
+        executable_names=("microsoft-edge", "microsoft-edge-stable", "msedge"),
         common_paths=(
             "/usr/bin/microsoft-edge",
             "/usr/bin/microsoft-edge-stable",
             "/usr/bin/msedge",
             "/opt/microsoft/msedge/msedge",
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
         ),
     )
 
@@ -64,12 +61,10 @@ def _resolve_edge_driver():
     """查找 EdgeDriver 路径。"""
     return _resolve_from_candidates(
         env_keys=("MSEDGEDRIVER", "EDGE_DRIVER", "EDGEWEBDRIVER"),
-        executable_names=("msedgedriver.exe", "msedgedriver"),
+        executable_names=("msedgedriver",),
         common_paths=(
             "/usr/local/bin/msedgedriver",
             "/usr/bin/msedgedriver",
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedgedriver.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedgedriver.exe",
         ),
     )
 
@@ -112,31 +107,51 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
     os.environ["SE_OFFLINE"] = "true"
     _ACCEPT_LANGUAGE = "zh-CN,zh;q=0.9"
     _LANG_PRIMARY = "zh-CN"
+    _DISABLED_EDGE_FEATURES = ",".join((
+        "AsyncDns",
+        "AutofillServerCommunication",
+        "CertificateTransparencyComponentUpdater",
+        "DialMediaRouteProvider",
+        "InterestFeedContentSuggestions",
+        "MediaRouter",
+        "OptimizationHints",
+        "Translate",
+    ))
 
     edge_options = Options()
 
     edge_binary = _resolve_edge_binary()
     if edge_binary:
         edge_options.binary_location = edge_binary
-    elif is_docker():
+    else:
         raise FileNotFoundError("未找到 Microsoft Edge 浏览器二进制，请检查容器内安装路径或设置 EDGE_BINARY")
 
     edge_options.add_argument('--headless')
     edge_options.add_argument("--disable-gpu")
-    edge_options.add_argument("--disable-features=AsyncDns")
+    edge_options.add_argument(f"--disable-features={_DISABLED_EDGE_FEATURES}")
     edge_options.add_argument("--disable-async-dns")
     edge_options.add_argument("--no-sandbox")
     edge_options.add_argument("--disable-dev-shm-usage")
     edge_options.add_argument("--inprivate")
     edge_options.add_argument("--disable-application-cache")
+    edge_options.add_argument("--disable-breakpad")
+    edge_options.add_argument("--disable-client-side-phishing-detection")
+    edge_options.add_argument("--disable-component-extensions-with-background-pages")
+    edge_options.add_argument("--disable-component-update")
+    edge_options.add_argument("--disable-default-apps")
+    edge_options.add_argument("--disable-domain-reliability")
     edge_options.add_argument("--disable-extensions")
     edge_options.add_argument("--disable-infobars")
     edge_options.add_argument("--disable-software-rasterizer")
     edge_options.add_argument("--autoplay-policy=no-user-gesture-required")
     edge_options.add_argument(f"--lang={_LANG_PRIMARY}")
     edge_options.add_argument("--disable-background-networking")
+    edge_options.add_argument("--disable-sync")
+    edge_options.add_argument("--dns-prefetch-disable")
+    edge_options.add_argument("--metrics-recording-only")
     edge_options.add_argument("--no-first-run")
     edge_options.add_argument("--no-default-browser-check")
+    edge_options.add_argument("--no-pings")
     edge_options.add_argument("--homepage=about:blank")
     edge_options.add_argument("--log-net-log=/tmp/netlog.json")
     edge_options.add_argument("--net-log-capture-mode=Everything")
@@ -146,13 +161,22 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
         print(f"SSL 密钥日志文件路径: {ssl_key_file_path}")
 
     prefs = {
+        "alternate_error_pages.enabled": False,
+        "autofill.credit_card_enabled": False,
+        "autofill.profile_enabled": False,
         "profile.default_content_settings.popups": 0,
         "credentials_enable_service": False,
+        "dns_prefetching.enabled": False,
         "profile.password_manager_enabled": False,
+        "profile.password_manager_leak_detection": False,
         "download.default_directory": download_folder,
         "download.prompt_for_download": False,
         "download.directory_upgrade": True,
-        "safebrowsing.enabled": True,
+        "net.network_prediction_options": 2,
+        "safebrowsing.disable_download_protection": True,
+        "safebrowsing.enabled": False,
+        "signin.allowed_on_next_startup": False,
+        "translate.enabled": False,
         "intl.accept_languages": _ACCEPT_LANGUAGE,
     }
     edge_options.add_experimental_option("prefs", prefs)
@@ -182,22 +206,13 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
 def kill_edge_processes():
     """清除 Edge 浏览器进程。"""
     try:
-        if os.name == "nt":
-            for image_name in ("msedgedriver.exe", "msedge.exe"):
-                subprocess.run(
-                    ["taskkill", "/F", "/T", "/IM", image_name],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-        else:
-            for pattern in ("msedgedriver", "microsoft-edge", "microsoft-edge-stable", "msedge"):
-                subprocess.run(
-                    ["pkill", "-KILL", "-f", pattern],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
+        for pattern in ("msedgedriver", "microsoft-edge", "microsoft-edge-stable", "msedge"):
+            subprocess.run(
+                ["pkill", "-KILL", "-f", pattern],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
     except Exception as e:
         print(f"Error occurred: {e}")
 
