@@ -24,6 +24,9 @@ from tools.chrome import (
 )
 
 
+EDGE_BINARY_PATH = "/usr/bin/microsoft-edge"
+
+
 def _resolve_from_candidates(env_keys, executable_names, common_paths):
     """按环境变量、PATH、常见路径顺序查找可执行文件。"""
     for env_key in env_keys:
@@ -41,20 +44,6 @@ def _resolve_from_candidates(env_keys, executable_names, common_paths):
             return candidate
 
     return None
-
-
-def _resolve_edge_binary():
-    """查找 Edge 浏览器二进制路径。"""
-    return _resolve_from_candidates(
-        env_keys=("EDGE_BINARY", "MSEDGE_BINARY"),
-        executable_names=("microsoft-edge", "microsoft-edge-stable", "msedge"),
-        common_paths=(
-            "/usr/bin/microsoft-edge",
-            "/usr/bin/microsoft-edge-stable",
-            "/usr/bin/msedge",
-            "/opt/microsoft/msedge/msedge",
-        ),
-    )
 
 
 def _resolve_edge_driver():
@@ -120,11 +109,9 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
 
     edge_options = Options()
 
-    edge_binary = _resolve_edge_binary()
-    if edge_binary:
-        edge_options.binary_location = edge_binary
-    else:
-        raise FileNotFoundError("未找到 Microsoft Edge 浏览器二进制，请检查容器内安装路径或设置 EDGE_BINARY")
+    if not os.path.exists(EDGE_BINARY_PATH):
+        raise FileNotFoundError(f"未找到 Microsoft Edge 浏览器二进制：{EDGE_BINARY_PATH}")
+    edge_options.binary_location = EDGE_BINARY_PATH
 
     edge_options.add_argument('--headless')
     edge_options.add_argument("--disable-gpu")
