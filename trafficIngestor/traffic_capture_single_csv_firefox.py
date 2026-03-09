@@ -24,9 +24,9 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     BASE_NAME = 'traffic_capture_single_csv_firefox'
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
-    CONTAINER_COUNT = 1
+    CONTAINER_COUNT = 15 * 20
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-    BASE_DST = '/netdisk/ww/test/edge'
+    BASE_DST = '/netdisk/ww/test/firefox'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"
     RETRY = 0
 

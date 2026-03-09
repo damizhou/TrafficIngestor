@@ -77,12 +77,12 @@ def kill_firefox_processes() -> None:
     """
     结束 Linux 上的 Firefox/GeckoDriver 进程。
     """
-    patterns = ("geckodriver", "firefox-esr", "firefox")
+    process_names = ("geckodriver", "firefox-esr", "firefox")
 
     try:
-        for p in patterns:
+        for process_name in process_names:
             subprocess.run(
-                ["pkill", "-KILL", "-f", p],
+                ["pkill", "-KILL", "-x", process_name],
                 check=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -138,8 +138,8 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
     opts.add_argument("-private")
 
     # --- 传输层：TLS1.2 + 禁 HTTP/3/Alt-Svc + 禁 DoH ---
-    opts.set_preference("security.tls.version.min", 4)  # TLS1.3
-    opts.set_preference("security.tls.version.max", 4)
+    # opts.set_preference("security.tls.version.min", 4)  # TLS1.3
+    # opts.set_preference("security.tls.version.max", 4)
     opts.set_preference("network.http.http3.enabled", False)
     opts.set_preference("network.http.altsvc.enabled", False)
     opts.set_preference("network.trr.mode", 5)  # 禁 DoH

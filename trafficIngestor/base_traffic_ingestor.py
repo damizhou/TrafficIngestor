@@ -416,7 +416,13 @@ class BaseTrafficIngestor(ABC):
                 return self.process_result(task, container)
             except (json.JSONDecodeError, FileNotFoundError, OSError) as e:
                 return False, f"post-processing error: {e}"
-        return False, (cp.stderr.strip() or cp.stdout.strip())
+        stderr = (cp.stderr or "").strip()
+        stdout = (cp.stdout or "").strip()
+        if stderr or stdout:
+            detail = stderr or stdout
+        else:
+            detail = "stdout/stderr empty"
+        return False, f"docker exec rc={cp.returncode}: {detail}"
 
     def process_result(self, task: Dict[str, str], container: str) -> Tuple[bool, str]:
         """处理任务执行结果，子类可覆盖"""

@@ -27,7 +27,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     CONTAINER_COUNT = 1
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
     BASE_DST = '/netdisk/ww/test/edge'
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider_edge:260308"
+    DOCKER_IMAGE = "chuanzhoupan/trace_spider_edge:260309"
     RETRY = 0
 
     CSV_PATH = os.path.join(_project_root, 'small_tools', 'test.csv')
