@@ -24,13 +24,13 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     BASE_NAME = 'traffic_capture_single_csv_edge'
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
-    CONTAINER_COUNT = 15 * 10
+    CONTAINER_COUNT = 1
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-    BASE_DST = '/netdisk/ww/top200000'
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
-    RETRY = 5
+    BASE_DST = '/netdisk/ww/test/edge'
+    DOCKER_IMAGE = "chuanzhoupan/trace_spider_edge:260308"
+    RETRY = 0
 
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'top300000_ingestor.csv')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'test.csv')
 
     def __init__(self):
         super().__init__()
@@ -48,21 +48,21 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     def on_task_success(self, task: Dict[str, str], paths: Dict[str, str]) -> None:
         """任务成功后从 CSV 删除记录"""
-        row_id = task.get("row_id", "")
-        if row_id:
-            try:
-                self.remove_from_csv(self.CSV_PATH, row_id)
-            except Exception as e:
-                self.log(f"ERROR: 删除 CSV 记录失败: {e}")
+        # row_id = task.get("row_id", "")
+        # if row_id:
+        #     try:
+        #         self.remove_from_csv(self.CSV_PATH, row_id)
+        #     except Exception as e:
+        #         self.log(f"ERROR: 删除 CSV 记录失败: {e}")
 
     def on_task_failed(self, task: Dict[str, str], error: str) -> None:
         """任务失败后也从 CSV 删除记录（避免重复处理）"""
-        row_id = task.get("row_id", "")
-        if row_id:
-            try:
-                self.remove_from_csv(self.CSV_PATH, row_id)
-            except Exception as e:
-                self.log(f"ERROR: 删除 CSV 记录失败: {e}")
+        # row_id = task.get("row_id", "")
+        # if row_id:
+        #     try:
+        #         self.remove_from_csv(self.CSV_PATH, row_id)
+        #     except Exception as e:
+        #         self.log(f"ERROR: 删除 CSV 记录失败: {e}")
 
     def should_continue(self) -> bool:
         """只运行一次"""
