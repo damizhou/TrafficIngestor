@@ -9,6 +9,7 @@ base_traffic_ingestor.py
 
 from __future__ import annotations
 import csv
+import ipaddress
 import os
 import sys
 import time
@@ -62,6 +63,8 @@ class BaseTrafficIngestor(ABC):
     DOCKER_EXEC_TIMEOUT: int = 6000
     RETRY: int = 5
     FIRST_EXEC_INTERVAL: float = 1.0
+    DOCKER_NETWORK: Optional[str] = None
+    CONTAINER_IP_START: Optional[str] = None
     DEFAULT_UID: int = int(os.environ.get('SUDO_UID', os.getuid()))
     DEFAULT_GID: int = int(os.environ.get('SUDO_GID', os.getgid()))
     CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH: bool = True
@@ -120,7 +123,43 @@ class BaseTrafficIngestor(ABC):
         cp = self.run_cmd(["docker", "inspect", "-f", "{{.State.Running}}", name])
         return (cp.returncode == 0) and (cp.stdout.strip().lower() == "true")
 
-    def create_container(self, name: str, host_code_path: str, image: str) -> None:
+    def build_container_ip(self, index: int) -> Optional[str]:
+        """按容器序号生成固定 IP；未配置时返回 None。"""
+        if not self.CONTAINER_IP_START:
+            return None
+        try:
+            return str(ipaddress.IPv4Address(self.CONTAINER_IP_START) + index)
+        except ValueError as e:
+            self.log(f"FATAL: 非法的容器起始 IP：{self.CONTAINER_IP_START} -> {e}")
+            sys.exit(2)
+
+    def get_container_ipv4(self, name: str) -> Optional[str]:
+        """获取容器当前 IPv4 地址。"""
+        cp = self.run_cmd([
+            "docker", "inspect", "-f",
+            "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}",
+            name
+        ])
+        if cp.returncode != 0:
+            return None
+        values = cp.stdout.strip().split()
+        return values[0] if values else None
+
+    def remove_container(self, name: str) -> None:
+        """删除单个容器。"""
+        cp = self.run_cmd(["docker", "rm", "-f", name])
+        if cp.returncode != 0:
+            self.log(f"FATAL: 删除容器失败: {name} -> {cp.stderr.strip()}")
+            sys.exit(2)
+        self.log(f"removed container: {name}")
+
+    def create_container(
+        self,
+        name: str,
+        host_code_path: str,
+        image: str,
+        container_ip: Optional[str] = None
+    ) -> None:
         """创建容器，同时挂载代码目录和 tools 目录"""
         uid, gid = str(os.getuid()), str(os.getgid())
         tools_path = os.path.join(_project_root, 'tools')
@@ -134,6 +173,10 @@ class BaseTrafficIngestor(ABC):
             "-e", f"HOST_GID={gid}",
             "--privileged",
         ]
+        if self.DOCKER_NETWORK:
+            cmd += ["--network", self.DOCKER_NETWORK]
+        if container_ip:
+            cmd += ["--ip", container_ip]
         if self.CREATE_WITH_TTY:
             cmd += ["-itd"]
         else:
@@ -143,7 +186,10 @@ class BaseTrafficIngestor(ABC):
         if cp.returncode != 0:
             self.log(f"FATAL: 创建容器失败: {name} -> {cp.stderr.strip()}")
             sys.exit(2)
-        self.log(f"created container: {name}")
+        if container_ip:
+            self.log(f"created container: {name} ip={container_ip}")
+        else:
+            self.log(f"created container: {name}")
 
     def start_container(self, name: str) -> None:
         """启动容器"""
@@ -200,20 +246,36 @@ class BaseTrafficIngestor(ABC):
 
         names = self.build_container_names()
         self.log(f"容器池规模={len(names)}: {names[0]} … {names[-1]}")
+        container_specs = [(index, name, self.build_container_ip(index)) for index, name in enumerate(names)]
+        if container_specs and container_specs[0][2] is not None:
+            self.log(f"固定 IP 范围={container_specs[0][2]} -> {container_specs[-1][2]}")
 
         created: List[str] = []
         created_lock = threading.Lock()
 
-        def check_and_create(name: str) -> None:
+        def check_and_create(spec: Tuple[int, str, Optional[str]]) -> None:
+            _, name, expected_ip = spec
             exists = self.container_exists(name)
             if exists is None:
-                self.create_container(name, str(host_code), self.DOCKER_IMAGE)
+                self.create_container(name, str(host_code), self.DOCKER_IMAGE, container_ip=expected_ip)
                 with created_lock:
                     created.append(name)
+                return
+            if expected_ip:
+                current_ip = self.get_container_ipv4(name)
+                if current_ip != expected_ip:
+                    self.log(
+                        f"WARN: {name} 当前 IP={current_ip or 'unknown'}，"
+                        f"期望 IP={expected_ip}，将重建容器"
+                    )
+                    self.remove_container(name)
+                    self.create_container(name, str(host_code), self.DOCKER_IMAGE, container_ip=expected_ip)
+                    with created_lock:
+                        created.append(name)
 
         # Pass 1：并发创建不存在的容器
         with ThreadPoolExecutor(max_workers=min(len(names), 20)) as pool:
-            pool.map(check_and_create, names)
+            pool.map(check_and_create, container_specs)
 
         # Pass 2：启动未运行的容器
         for n in names:

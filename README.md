@@ -60,6 +60,8 @@ id,url,domain
 
 - `python trafficIngestor/traffic_capture_single_csv.py`
   Chrome 批量流量采集
+- `python trafficIngestor/traffic_capture_single_csv_fixed_ip.py`
+  Chrome 批量流量采集，容器 IP 从 `172.17.50.0` 开始递增
 - `python trafficIngestor/traffic_capture_single_csv_edge.py`
   Edge 测试或定向采集
 - `python trafficIngestor/traffic_capture_single_csv_firefox.py`
@@ -91,6 +93,9 @@ id,url,domain
 - `CONTAINER_COUNT`：容器并发数
 - `DOCKER_IMAGE`：容器镜像
 - `RETRY`：失败重试次数
+- `CONTAINER_IP_START`：可选，按容器序号递增分配固定 IPv4
+
+固定 IP 入口 `traffic_capture_single_csv_fixed_ip.py` 默认从 `172.17.50.0` 开始分配，150 个容器会使用到 `172.17.50.149`。如果宿主机 Docker 网桥不在 `172.17.0.0/16` 网段，需要同步调整脚本中的 IP 起始值或网络配置。
 
 ### 数据库采集任务
 数据库模式使用 `db/db_config.ini`。需要提供 `mysql` 配置节，并包含：
