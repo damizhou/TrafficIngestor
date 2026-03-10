@@ -17,7 +17,20 @@ if _project_root not in sys.path:
 _capture_process = None
 
 
-def capture(task_name, formatted_time, parsers, data_base_dir=None, logger=None):
+def _build_tcpdump_filter_tokens(exclude_hosts=None):
+    """构造 tcpdump BPF 过滤表达式参数。"""
+    filter_tokens = []
+    normalized_hosts = tuple(host for host in (exclude_hosts or ()) if host)
+
+    for index, host in enumerate(normalized_hosts):
+        if index > 0:
+            filter_tokens.append("and")
+        filter_tokens.extend(["not", "host", host])
+
+    return filter_tokens
+
+
+def capture(task_name, formatted_time, parsers, data_base_dir=None, logger=None, exclude_hosts=None):
     """
     启动流量捕获
 
@@ -27,6 +40,7 @@ def capture(task_name, formatted_time, parsers, data_base_dir=None, logger=None)
         parsers: 解析器名称/前缀
         data_base_dir: 数据基础目录
         logger: 日志记录器
+        exclude_hosts: 需要从抓包中排除的主机列表
 
     Returns:
         traffic_name: pcap文件路径
@@ -50,6 +64,7 @@ def capture(task_name, formatted_time, parsers, data_base_dir=None, logger=None)
         "-w",
         traffic_name,
     ]
+    tcpdump_command.extend(_build_tcpdump_filter_tokens(exclude_hosts=exclude_hosts))
 
     if logger:
         logger.info(f'tcpdump_command:{tcpdump_command}')
@@ -83,7 +98,11 @@ def stop_capture(logger=None) -> str:
     try:
         p = psutil.Process(pid)
         cmdline = p.cmdline()
-        file_path = cmdline[-1]
+        file_path = ""
+        if "-w" in cmdline:
+            write_index = cmdline.index("-w")
+            if write_index + 1 < len(cmdline):
+                file_path = cmdline[write_index + 1]
 
         # 尝试设置文件权限
         try:

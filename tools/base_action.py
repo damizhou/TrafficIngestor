@@ -53,7 +53,14 @@ class BaseAction(ABC):
 
     def traffic(self, index=0, formatted_time=None):
         """启动流量捕获"""
-        capture(self.allowed_domain, formatted_time, f"{index}", data_base_dir=_project_root)
+        capture(
+            self.allowed_domain,
+            formatted_time,
+            f"{index}",
+            data_base_dir=_project_root,
+            logger=self.logger,
+            exclude_hosts=self.get_capture_exclude_hosts(),
+        )
 
     def kill_browser_processes(self):
         """清理浏览器进程，子类可覆盖为其他浏览器实现。"""
@@ -72,6 +79,10 @@ class BaseAction(ABC):
             browser, url, ssl_key_file_path,
             data_base_dir=_project_root
         )
+
+    def get_capture_exclude_hosts(self):
+        """返回需要从抓包中排除的主机列表，子类可覆盖。"""
+        return ()
 
     def clean_old_files(self, meta_path):
         """清理旧文件"""
@@ -161,6 +172,16 @@ class BaseAction(ABC):
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
 
+    def start_capture_thread(self, row_id, formatted_time):
+        """启动抓包线程并等待 tcpdump 就绪。"""
+        traffic_thread = threading.Thread(
+            target=self.traffic,
+            kwargs={"index": row_id, "formatted_time": formatted_time}
+        )
+        traffic_thread.start()
+        time.sleep(1)
+        return traffic_thread
+
     def start_task(self, payload):
         """
         启动任务的主方法（不含重试逻辑，重试由调用方处理）
@@ -193,41 +214,45 @@ class BaseAction(ABC):
         pcap_path = ""
         current_url = ""
         open_url_error = ""
+        ssl_key_file_path = ""
+        browser = None
+        traffic_thread = None
 
-        # 开流量收集
-        traffic_thread = threading.Thread(
-            target=self.traffic,
-            kwargs={"index": row_id, "formatted_time": formatted_time}
-        )
-        traffic_thread.start()
-        time.sleep(1)
-
-        self.logger.info(f"创建{self.browser_name}浏览器")
-        browser, ssl_key_file_path = self.create_browser_driver(formatted_time, row_id)
-
-        self.logger.info(f"开始访问第{row_id}的词条：{url}")
         try:
-            content_path, html_path, screenshot_path, current_url = self.open_and_save_content(
-                browser, url, ssl_key_file_path
-            )
+            traffic_thread = self.start_capture_thread(row_id, formatted_time)
+            self.logger.info(f"创建{self.browser_name}浏览器")
+            browser, ssl_key_file_path = self.create_browser_driver(formatted_time, row_id)
         except Exception as e:
             open_url_error = repr(e).replace("\n", " ")
-            self.logger.error(f"open_url_and_save_content 异常: {e}")
+            self.logger.error(f"浏览器初始化异常: {e}")
 
-        try:
-            browser.quit()
-        except Exception as e:
-            self.logger.warning(f"browser.quit() 异常: {e}")
+        if browser is not None:
+            self.logger.info(f"开始访问第{row_id}的词条：{url}")
+            try:
+                content_path, html_path, screenshot_path, current_url = self.open_and_save_content(
+                    browser, url, ssl_key_file_path
+                )
+            except Exception as e:
+                open_url_error = repr(e).replace("\n", " ")
+                self.logger.error(f"open_url_and_save_content 异常: {e}")
+
+            try:
+                browser.quit()
+            except Exception as e:
+                self.logger.warning(f"browser.quit() 异常: {e}")
 
         self.logger.info("清理浏览器进程(兜底)")
         self.kill_browser_processes()
 
-        self.logger.info(f"等待TCP结束挥手完成，耗时60秒")
-        time.sleep(60)
+        if traffic_thread is not None:
+            self.logger.info(f"等待TCP结束挥手完成，耗时60秒")
+            time.sleep(60)
 
-        # 关流量收集
-        self.logger.info(f"关流量收集")
-        pcap_path = stop_capture()
+            # 关流量收集
+            self.logger.info(f"关流量收集")
+            pcap_path = stop_capture()
+        else:
+            self.logger.info("抓包未启动，跳过停止抓包")
 
         # 检查页面是否为404
         page_not_found = self.check_page_not_found(html_path, self.allowed_domain)
