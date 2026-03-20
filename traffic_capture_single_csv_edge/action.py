@@ -18,6 +18,7 @@ EDGE_BACKGROUND_CAPTURE_EXCLUDE_HOSTS = (
     "www.bing.com",
     "edgeassetservice.azureedge.net",
     "self.events.data.microsoft.com",
+    "nav-edge.smartscreen.microsoft.com",
     "c.bing.com",
     "th.bing.com",
     "ntp.msn.com",
@@ -51,7 +52,8 @@ class XCaptureEdgeAction(BaseAction):
     def create_browser_driver(self, formatted_time, row_id):
         return create_edge_driver(
             self.allowed_domain, formatted_time, f"{row_id}",
-            data_base_dir=_current_dir
+            data_base_dir=_current_dir,
+            blocked_hosts=self.get_capture_exclude_hosts(),
         )
 
     def open_and_save_content(self, browser, url, ssl_key_file_path):

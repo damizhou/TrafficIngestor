@@ -2,14 +2,14 @@
 统一的Edge浏览器驱动模块
 基于Chromium Edge，复用Chrome的内容提取、截图与Cookie处理逻辑。
 """
-from selenium import webdriver
-from selenium.webdriver.edge.options import Options
-from selenium.webdriver.edge.service import Service
 import os
 import sys
 import shutil
 import subprocess
 from datetime import datetime
+from selenium import webdriver
+from selenium.webdriver.edge.options import Options
+from selenium.webdriver.edge.service import Service
 
 # 添加项目根目录到路径
 _current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +25,37 @@ from tools.chrome import (
 
 
 EDGE_BINARY_PATH = "/usr/bin/microsoft-edge"
+
+
+def _normalize_hosts(hosts):
+    """规范化主机名，避免空值、重复值和大小写差异。"""
+    normalized_hosts = []
+    seen = set()
+
+    for host in hosts or ():
+        normalized_host = str(host or "").strip().strip(".").lower()
+        if not normalized_host or normalized_host in seen:
+            continue
+        seen.add(normalized_host)
+        normalized_hosts.append(normalized_host)
+
+    return tuple(normalized_hosts)
+
+
+def _build_host_resolver_rules(blocked_hosts):
+    """构造 Chromium host-resolver-rules，让目标主机在解析阶段直接失败。"""
+    return ",".join(
+        f"MAP {host} ^NOTFOUND"
+        for host in _normalize_hosts(blocked_hosts)
+    )
+
+
+def _build_blocked_url_patterns(blocked_hosts):
+    """构造 DevTools URL 拦截规则，作为 host-resolver-rules 的补充。"""
+    return [
+        f"*://{host}/*"
+        for host in _normalize_hosts(blocked_hosts)
+    ]
 
 
 def _resolve_from_candidates(env_keys, executable_names, common_paths):
@@ -59,7 +90,7 @@ def _resolve_edge_driver():
 
 
 def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
-                       enable_ssl_key_log=True, data_base_dir=None):
+                       enable_ssl_key_log=True, data_base_dir=None, blocked_hosts=None):
     """
     创建Edge浏览器驱动
 
@@ -69,6 +100,7 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
         parsers: 解析器名称/前缀
         enable_ssl_key_log: 是否启用SSL密钥日志（默认True）
         data_base_dir: 数据基础目录，默认为项目根目录下的相对路径
+        blocked_hosts: 浏览器启动期就需要阻断的主机列表
 
     Returns:
         browser: WebDriver实例
@@ -94,6 +126,7 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
     os.makedirs(download_folder, exist_ok=True)
 
     os.environ["SE_OFFLINE"] = "true"
+    normalized_blocked_hosts = _normalize_hosts(blocked_hosts)
     _ACCEPT_LANGUAGE = "zh-CN,zh;q=0.9"
     _LANG_PRIMARY = "zh-CN"
     _DISABLED_EDGE_FEATURES = ",".join((
@@ -142,6 +175,10 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
     edge_options.add_argument("--homepage=about:blank")
     edge_options.add_argument("--log-net-log=/tmp/netlog.json")
     edge_options.add_argument("--net-log-capture-mode=Everything")
+    if normalized_blocked_hosts:
+        edge_options.add_argument(
+            f"--host-resolver-rules={_build_host_resolver_rules(normalized_blocked_hosts)}"
+        )
 
     if ssl_key_file_path:
         edge_options.add_argument(f"--ssl-key-log-file={ssl_key_file_path}")
@@ -177,6 +214,14 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
 
     browser = webdriver.Edge(service=service, options=edge_options)
     browser.execute_cdp_cmd('Network.enable', {})
+    if normalized_blocked_hosts:
+        try:
+            browser.execute_cdp_cmd(
+                'Network.setBlockedURLs',
+                {'urls': _build_blocked_url_patterns(normalized_blocked_hosts)}
+            )
+        except Exception as e:
+            print(f"设置 Edge URL 拦截规则失败，将仅依赖 host-resolver-rules: {e}")
     browser.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {'Accept-Language': _ACCEPT_LANGUAGE}})
     browser.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument',
                             {'source': '''

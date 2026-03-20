@@ -1,0 +1,2 @@
+- [x] 已完成并验证：排查 `traffic_capture_single_csv_edge/action.py` 中 `EDGE_BACKGROUND_CAPTURE_EXCLUDE_HOSTS` 不生效原因 - 2026-03-20 11:17
+- [x] 已完成并验证：让 Edge 背景排除主机不再出现在 pcap / SNI 中 - 2026-03-20 11:25

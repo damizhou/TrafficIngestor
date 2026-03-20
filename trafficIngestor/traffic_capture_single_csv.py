@@ -27,7 +27,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-    BASE_DST = '/netdisk/ww/top200000'
+    BASE_DST = '/netdisk2/ww/top2000/homepage_only/260320/chrome'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 
@@ -38,7 +38,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # 示例：
     # id,url,domain
     # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'top330000_ingestor.csv')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'homeonly_merged_chrome.csv')
 
     def __init__(self):
         super().__init__()
@@ -65,12 +65,12 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     def on_task_failed(self, task: Dict[str, str], error: str) -> None:
         """任务失败后也从 CSV 删除记录（避免重复处理）"""
-        row_id = task.get("row_id", "")
-        if row_id:
-            try:
-                self.remove_from_csv(self.CSV_PATH, row_id)
-            except Exception as e:
-                self.log(f"ERROR: 删除 CSV 记录失败: {e}")
+        # row_id = task.get("row_id", "")
+        # if row_id:
+        #     try:
+        #         self.remove_from_csv(self.CSV_PATH, row_id)
+        #     except Exception as e:
+        #         self.log(f"ERROR: 删除 CSV 记录失败: {e}")
 
     def should_continue(self) -> bool:
         """只运行一次"""
