@@ -1,15 +1,15 @@
 """
 统一的Firefox浏览器驱动模块
 """
-from selenium import webdriver
-from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.firefox.service import Service
 import os
 import sys
 import subprocess
 import re
 import time
 from datetime import datetime
+from selenium import webdriver
+from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.firefox.service import Service
 
 # 添加项目根目录到路径
 _current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -73,6 +73,60 @@ function __select_all_and_copy_capture(){
 """
 
 
+FIREFOX_BINARY_PATH = "/usr/bin/firefox"
+DEFAULT_FIREFOX_VERSION = "138.0"
+DESKTOP_FIREFOX_PLATFORM = "Linux x86_64"
+DESKTOP_FIREFOX_OSCPU = "Linux x86_64"
+DESKTOP_FIREFOX_APP_VERSION = "5.0 (X11)"
+_cached_firefox_version = None
+
+
+def _resolve_firefox_version():
+    """解析 Firefox 版本，优先跟随容器内真实浏览器版本。"""
+    global _cached_firefox_version
+    if _cached_firefox_version:
+        return _cached_firefox_version
+
+    try:
+        completed = subprocess.run(
+            [FIREFOX_BINARY_PATH, "--version"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+        )
+        version_text = " ".join(
+            part.strip()
+            for part in (completed.stdout, completed.stderr)
+            if part and part.strip()
+        )
+        matched = re.search(r"(\d+(?:\.\d+)+)", version_text)
+        if matched:
+            _cached_firefox_version = matched.group(1)
+            return _cached_firefox_version
+    except Exception:
+        pass
+
+    _cached_firefox_version = DEFAULT_FIREFOX_VERSION
+    return _cached_firefox_version
+
+
+def _build_desktop_firefox_identity():
+    """生成桌面版 Linux Firefox 的 UA / navigator 指纹。"""
+    full_version = _resolve_firefox_version()
+    user_agent = (
+        "Mozilla/5.0 (X11; Linux x86_64; "
+        f"rv:{full_version}) Gecko/20100101 Firefox/{full_version}"
+    )
+    return {
+        "user_agent": user_agent,
+        "platform": DESKTOP_FIREFOX_PLATFORM,
+        "oscpu": DESKTOP_FIREFOX_OSCPU,
+        "app_version": DESKTOP_FIREFOX_APP_VERSION,
+    }
+
+
 def kill_firefox_processes() -> None:
     """
     结束 Linux 上的 Firefox/GeckoDriver 进程。
@@ -131,9 +185,10 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
     os.environ["SSLKEYLOGFILE"] = ssl_key_file_path
 
     _ACCEPT_LANGUAGE = "zh-CN,zh;q=0.9"
+    desktop_firefox_identity = _build_desktop_firefox_identity()
 
     opts = Options()
-    opts.binary_location = "/usr/bin/firefox"
+    opts.binary_location = FIREFOX_BINARY_PATH
     opts.add_argument("-headless")
     opts.add_argument("-private")
 
@@ -222,6 +277,10 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
 
     # --- 语言 & 下载 ---
     opts.set_preference("intl.accept_languages", _ACCEPT_LANGUAGE)
+    opts.set_preference("general.useragent.override", desktop_firefox_identity["user_agent"])
+    opts.set_preference("general.platform.override", desktop_firefox_identity["platform"])
+    opts.set_preference("general.oscpu.override", desktop_firefox_identity["oscpu"])
+    opts.set_preference("general.appversion.override", desktop_firefox_identity["app_version"])
     opts.set_preference("browser.download.folderList", 2)
     opts.set_preference("browser.download.dir", download_folder)
     opts.set_preference("browser.download.useDownloadDir", True)
@@ -233,6 +292,7 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
     # 创建 WebDriver（geckodriver）
     service = Service(executable_path="/usr/local/bin/geckodriver")
     browser = webdriver.Firefox(service=service, options=opts)
+    browser.set_window_size(1920, 1080)
     return browser, ssl_key_file_path
 
 

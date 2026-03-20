@@ -2,7 +2,9 @@
 统一的Edge浏览器驱动模块
 基于Chromium Edge，复用Chrome的内容提取、截图与Cookie处理逻辑。
 """
+import json
 import os
+import re
 import sys
 import shutil
 import subprocess
@@ -25,6 +27,175 @@ from tools.chrome import (
 
 
 EDGE_BINARY_PATH = "/usr/bin/microsoft-edge"
+DEFAULT_EDGE_VERSION = "145.0.0.0"
+DESKTOP_EDGE_NAVIGATOR_PLATFORM = "Linux x86_64"
+DESKTOP_EDGE_UA_PLATFORM = "Linux"
+DESKTOP_EDGE_PLATFORM_VERSION = "6.0.0"
+DESKTOP_EDGE_ARCHITECTURE = "x86"
+DESKTOP_EDGE_BITNESS = "64"
+DESKTOP_EDGE_WOW64 = False
+DESKTOP_EDGE_BRAND_GREASE = "Not_A Brand"
+DESKTOP_EDGE_BRAND_GREASE_VERSION = "8"
+_cached_edge_version = None
+
+
+def _resolve_edge_version():
+    """解析 Edge 主版本，优先跟随容器内真实浏览器版本。"""
+    global _cached_edge_version
+    if _cached_edge_version:
+        return _cached_edge_version
+
+    try:
+        completed = subprocess.run(
+            [EDGE_BINARY_PATH, "--version"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+        )
+        version_text = " ".join(
+            part.strip()
+            for part in (completed.stdout, completed.stderr)
+            if part and part.strip()
+        )
+        matched = re.search(r"(\d+\.\d+\.\d+\.\d+)", version_text)
+        if matched:
+            _cached_edge_version = matched.group(1)
+            return _cached_edge_version
+    except Exception:
+        pass
+
+    _cached_edge_version = DEFAULT_EDGE_VERSION
+    return _cached_edge_version
+
+
+def _build_desktop_edge_identity():
+    """生成桌面版 Linux Edge 的 UA / UA-CH 指纹。"""
+    full_version = _resolve_edge_version()
+    major_version = full_version.split(".", 1)[0]
+    user_agent = (
+        "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        f"Chrome/{full_version} Safari/537.36 Edg/{full_version}"
+    )
+    user_agent_metadata = {
+        "brands": [
+            {"brand": DESKTOP_EDGE_BRAND_GREASE, "version": DESKTOP_EDGE_BRAND_GREASE_VERSION},
+            {"brand": "Chromium", "version": major_version},
+            {"brand": "Microsoft Edge", "version": major_version},
+        ],
+        "fullVersionList": [
+            {"brand": DESKTOP_EDGE_BRAND_GREASE, "version": f"{DESKTOP_EDGE_BRAND_GREASE_VERSION}.0.0.0"},
+            {"brand": "Chromium", "version": full_version},
+            {"brand": "Microsoft Edge", "version": full_version},
+        ],
+        "platform": DESKTOP_EDGE_UA_PLATFORM,
+        "platformVersion": DESKTOP_EDGE_PLATFORM_VERSION,
+        "architecture": DESKTOP_EDGE_ARCHITECTURE,
+        "model": "",
+        "mobile": False,
+        "bitness": DESKTOP_EDGE_BITNESS,
+        "wow64": DESKTOP_EDGE_WOW64,
+    }
+    return {
+        "user_agent": user_agent,
+        "app_version": user_agent.split(" ", 1)[1],
+        "navigator_platform": DESKTOP_EDGE_NAVIGATOR_PLATFORM,
+        "user_agent_metadata": user_agent_metadata,
+    }
+
+
+def _build_user_agent_override_payload(accept_language, identity):
+    """构造 CDP UA 覆写参数。"""
+    return {
+        "userAgent": identity["user_agent"],
+        "acceptLanguage": accept_language,
+        "platform": identity["navigator_platform"],
+        "userAgentMetadata": identity["user_agent_metadata"],
+    }
+
+
+def _build_stealth_script(lang_primary, identity):
+    """构造页面初始化注入脚本，补齐常见 navigator 指纹。"""
+    script_payload = json.dumps(
+        {
+            "language": lang_primary,
+            "languages": [lang_primary, "zh"],
+            "platform": identity["navigator_platform"],
+            "userAgent": identity["user_agent"],
+            "appVersion": identity["app_version"],
+            "vendor": "Google Inc.",
+            "userAgentData": {
+                "brands": identity["user_agent_metadata"]["brands"],
+                "mobile": False,
+                "platform": identity["user_agent_metadata"]["platform"],
+                "highEntropyValues": {
+                    "architecture": identity["user_agent_metadata"]["architecture"],
+                    "bitness": identity["user_agent_metadata"]["bitness"],
+                    "brands": identity["user_agent_metadata"]["brands"],
+                    "fullVersionList": identity["user_agent_metadata"]["fullVersionList"],
+                    "mobile": False,
+                    "model": identity["user_agent_metadata"]["model"],
+                    "platform": identity["user_agent_metadata"]["platform"],
+                    "platformVersion": identity["user_agent_metadata"]["platformVersion"],
+                    "uaFullVersion": _resolve_edge_version(),
+                    "wow64": identity["user_agent_metadata"]["wow64"],
+                },
+            },
+        },
+        ensure_ascii=False,
+    )
+    return f"""
+const __edgeStealth = {script_payload};
+const __edgeUaData = {{
+  brands: __edgeStealth.userAgentData.brands,
+  mobile: __edgeStealth.userAgentData.mobile,
+  platform: __edgeStealth.userAgentData.platform,
+  toJSON() {{
+    return {{
+      brands: this.brands,
+      mobile: this.mobile,
+      platform: this.platform,
+    }};
+  }},
+  async getHighEntropyValues(hints) {{
+    const values = {{}};
+    for (const hint of hints || []) {{
+      if (Object.prototype.hasOwnProperty.call(__edgeStealth.userAgentData.highEntropyValues, hint)) {{
+        values[hint] = __edgeStealth.userAgentData.highEntropyValues[hint];
+      }}
+    }}
+    values.brands = __edgeStealth.userAgentData.brands;
+    values.mobile = __edgeStealth.userAgentData.mobile;
+    values.platform = __edgeStealth.userAgentData.platform;
+    return values;
+  }},
+}};
+Object.defineProperty(navigator, "webdriver", {{get: () => undefined}});
+Object.defineProperty(navigator, "language", {{get: () => __edgeStealth.language}});
+Object.defineProperty(navigator, "languages", {{get: () => __edgeStealth.languages}});
+Object.defineProperty(navigator, "platform", {{get: () => __edgeStealth.platform}});
+Object.defineProperty(navigator, "userAgent", {{get: () => __edgeStealth.userAgent}});
+Object.defineProperty(navigator, "appVersion", {{get: () => __edgeStealth.appVersion}});
+Object.defineProperty(navigator, "vendor", {{get: () => __edgeStealth.vendor}});
+Object.defineProperty(navigator, "userAgentData", {{get: () => __edgeUaData}});
+""".strip()
+
+
+def _apply_user_agent_override(browser, accept_language, identity):
+    """优先用 Emulation 域覆写 UA，失败时回退到 Network 域。"""
+    payload = _build_user_agent_override_payload(accept_language, identity)
+    try:
+        browser.execute_cdp_cmd("Emulation.setUserAgentOverride", payload)
+        return
+    except Exception:
+        pass
+
+    try:
+        browser.execute_cdp_cmd("Network.setUserAgentOverride", payload)
+    except Exception as e:
+        print(f"设置 Edge UA 覆写失败，将仅依赖启动参数和注入脚本: {e}")
 
 
 def _normalize_hosts(hosts):
@@ -129,6 +300,7 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
     normalized_blocked_hosts = _normalize_hosts(blocked_hosts)
     _ACCEPT_LANGUAGE = "zh-CN,zh;q=0.9"
     _LANG_PRIMARY = "zh-CN"
+    desktop_edge_identity = _build_desktop_edge_identity()
     _DISABLED_EDGE_FEATURES = ",".join((
         "AsyncDns",
         "AutofillServerCommunication",
@@ -147,7 +319,9 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
     edge_options.binary_location = EDGE_BINARY_PATH
 
     edge_options.add_argument('--headless')
+    edge_options.add_argument(f"--user-agent={desktop_edge_identity['user_agent']}")
     edge_options.add_argument("--disable-gpu")
+    edge_options.add_argument("--disable-blink-features=AutomationControlled")
     edge_options.add_argument(f"--disable-features={_DISABLED_EDGE_FEATURES}")
     edge_options.add_argument("--disable-async-dns")
     edge_options.add_argument("--no-sandbox")
@@ -173,6 +347,7 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
     edge_options.add_argument("--no-default-browser-check")
     edge_options.add_argument("--no-pings")
     edge_options.add_argument("--homepage=about:blank")
+    edge_options.add_argument("--window-size=1920,1080")
     edge_options.add_argument("--log-net-log=/tmp/netlog.json")
     edge_options.add_argument("--net-log-capture-mode=Everything")
     if normalized_blocked_hosts:
@@ -214,6 +389,7 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
 
     browser = webdriver.Edge(service=service, options=edge_options)
     browser.execute_cdp_cmd('Network.enable', {})
+    _apply_user_agent_override(browser, _ACCEPT_LANGUAGE, desktop_edge_identity)
     if normalized_blocked_hosts:
         try:
             browser.execute_cdp_cmd(
@@ -224,11 +400,7 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
             print(f"设置 Edge URL 拦截规则失败，将仅依赖 host-resolver-rules: {e}")
     browser.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {'Accept-Language': _ACCEPT_LANGUAGE}})
     browser.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument',
-                            {'source': '''
-                            Object.defineProperty(navigator,"webdriver",{get:()=>undefined});
-                            Object.defineProperty(navigator,"language",{get:()=> "zh-CN"});
-                            Object.defineProperty(navigator,"languages",{get:()=> ["zh-CN","zh"]});
-                            '''.strip()})
+                            {'source': _build_stealth_script(_LANG_PRIMARY, desktop_edge_identity)})
 
     if ssl_key_file_path:
         return browser, ssl_key_file_path
