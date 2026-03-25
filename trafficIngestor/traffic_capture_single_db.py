@@ -89,7 +89,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # 默认并发不宜过高；可通过环境变量覆盖（例如 180）
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-    BASE_DST = '/netdisk/news_receiver'
+    BASE_DST = '/netdisk2/news_receiver'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     BATCH_SIZE = 20000

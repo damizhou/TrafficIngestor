@@ -26,11 +26,11 @@ class TrafficIngestor(BaseTrafficIngestor):
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-    BASE_DST = '/netdisk2/ww/top2000/homepage_only/260320/firefox'
+    BASE_DST = '/netdisk2/ww/wiki/0325/firefox'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"
     RETRY = 5
 
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'homeonly_merged_firefox.csv')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'wiki_firefox.csv')
 
     def __init__(self):
         super().__init__()
@@ -76,4 +76,8 @@ class TrafficIngestor(BaseTrafficIngestor):
 
 
 if __name__ == "__main__":
+    TrafficIngestor.main()
+    TrafficIngestor.main()
+    TrafficIngestor.main()
+    TrafficIngestor.main()
     TrafficIngestor.main()

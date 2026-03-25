@@ -3,3 +3,5 @@
 - [x] 已完成并验证：将 Edge Linux 无头指纹伪装为 Windows 桌面版 Edge - 2026-03-20 12:10
 - [x] 已完成并验证：将 Firefox Linux 无头指纹伪装为 Windows 桌面版 Firefox - 2026-03-20 12:10
 - [x] 已完成并验证：将 Edge / Firefox 伪装身份从 Windows 切回 Linux 桌面版 - 2026-03-20 12:15
+- [x] 已完成并验证：新增 `small_tools/x_url_txt_to_csv.py`，支持将 `x_url.txt` 转为 `id,url,domain` CSV 并控制重复次数 - 2026-03-25 10:00
+- [x] 已完成并验证：调整 `small_tools/x_url_txt_to_csv.py` 的重复语义为“整表轮转重复且保持相同 id,url,domain” - 2026-03-25 10:08
