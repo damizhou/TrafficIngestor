@@ -681,6 +681,7 @@ class BaseTrafficIngestor(ABC):
         try:
             while True:
                 jobs = self.fetch_jobs()
+                self.log(f"fetched jobs: {len(jobs)}")
                 if not jobs:
                     self.log("没有可处理的任务，退出。")
                     break

@@ -1,5 +1,6 @@
 .idea/
 */logs/
 db/
-small_tools/
+small_tools/result
+small_tools/origin
 *__pycache__*

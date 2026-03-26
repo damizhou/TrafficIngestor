@@ -16,7 +16,7 @@ _project_root = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor, get_real_username
+from trafficIngestor.base_traffic_ingestor_yjn import BaseTrafficIngestor, get_real_username
 
 
 class TrafficIngestor(BaseTrafficIngestor):
