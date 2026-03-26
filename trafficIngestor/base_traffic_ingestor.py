@@ -164,6 +164,7 @@ class BaseTrafficIngestor(ABC):
         """创建容器，同时挂载代码目录和 tools 目录"""
         uid, gid = str(os.getuid()), str(os.getgid())
         tools_path = os.path.join(_project_root, 'tools')
+        self.log(f"creating container: {name}")
         cmd = [
             "docker", "run",
             "--init",
@@ -268,13 +269,14 @@ class BaseTrafficIngestor(ABC):
         """准备容器池，返回容器名列表"""
         self.ensure_docker_available()
 
-        host_code = Path(self.HOST_CODE_PATH)
+        host_code = self.ensure_host_code_path_ready()
         if not host_code.exists():
             self.log(f"WARN: 宿主机代码目录不存在：{host_code}，仍会尝试挂载。")
         if not host_code.is_absolute():
             self.log(f"WARN: 建议使用绝对路径挂载，当前={host_code}")
 
         names = self.build_container_names()
+        self.log("checking and creating containers...")
         self.log(f"容器池规模={len(names)}: {names[0]} … {names[-1]}")
         container_specs = [(index, name, self.build_container_ip(index)) for index, name in enumerate(names)]
         if container_specs and container_specs[0][2] is not None:
