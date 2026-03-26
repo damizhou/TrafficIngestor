@@ -23,11 +23,11 @@ class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
 
     # ============== 配置 ==============
-    BASE_NAME = 'traffic_capture_single_csv'
+    BASE_NAME = 'traffic_capture_single_csv_bsky'
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-    BASE_DST = '/netdisk2/ww/wiki/0325/chrome'
+    BASE_DST = '/netdisk/lyl/0326/chrome/without_login'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 
@@ -38,7 +38,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # 示例：
     # id,url,domain
     # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'wiki_chrome.csv')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'bsky_urls_1000.csv')
 
     def __init__(self):
         super().__init__()

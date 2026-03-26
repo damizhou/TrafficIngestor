@@ -235,6 +235,35 @@ class BaseTrafficIngestor(ABC):
         """构建容器名列表"""
         return [f"{self.CONTAINER_PREFIX}{i}" for i in range(self.CONTAINER_COUNT)]
 
+    def get_default_action_source(self) -> Path:
+        """Return the fallback action.py path."""
+        return Path(_project_root) / "traffic_capture_single_csv" / "action.py"
+
+    def ensure_host_code_path_ready(self, ensure_action: bool = True) -> Path:
+        """Ensure HOST_CODE_PATH exists and optionally backfill action.py."""
+        host_code = Path(self.HOST_CODE_PATH)
+        if host_code.exists() and not host_code.is_dir():
+            raise NotADirectoryError(f"HOST_CODE_PATH exists but is not a directory: {host_code}")
+
+        if not host_code.exists():
+            host_code.mkdir(parents=True, exist_ok=True)
+            self.log(f"created HOST_CODE_PATH: {host_code}")
+
+        if ensure_action:
+            action_src = self.get_default_action_source()
+            if not action_src.exists() or not action_src.is_file():
+                raise FileNotFoundError(f"default action.py not found: {action_src}")
+
+            action_dst = host_code / "action.py"
+            if action_dst.exists() and not action_dst.is_file():
+                raise IsADirectoryError(f"target action.py exists but is not a file: {action_dst}")
+            if not action_dst.exists():
+                shutil.copy2(action_src, action_dst)
+                self.chown_recursive(str(action_dst))
+                self.log(f"copied default action.py to: {action_dst}")
+
+        return host_code
+
     def prepare_pool_once(self) -> List[str]:
         """准备容器池，返回容器名列表"""
         self.ensure_docker_available()
@@ -294,7 +323,7 @@ class BaseTrafficIngestor(ABC):
     # ============== 文件操作 ==============
     def clear_host_code_subdirs(self) -> None:
         """清理 HOST_CODE_PATH 下的临时子目录，保留 tools"""
-        base_path = Path(self.HOST_CODE_PATH)
+        base_path = self.ensure_host_code_path_ready()
         if not base_path.exists() or not base_path.is_dir():
             self.log(f"WARN: HOST_CODE_PATH 不存在或不是目录：{base_path}")
             return
@@ -751,3 +780,4 @@ class BaseTrafficIngestor(ABC):
         """入口方法"""
         ingestor = cls()
         ingestor.run()
+        time.sleep(300)

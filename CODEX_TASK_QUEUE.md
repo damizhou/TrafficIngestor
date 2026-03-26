@@ -9,3 +9,4 @@
 - [x] 已完成并验证：调整 `trafficIngestor/base_traffic_ingestor.py` 执行顺序，先读取任务，仅在有任务时再创建 Docker 和做运行时清理 - 2026-03-26 09:30
 - [x] 已完成并验证：调整 `trafficIngestor/base_traffic_ingestor.py`，在获取任务后立即打印任务数量 - 2026-03-26 10:22
 - [x] 已完成并验证：调整 `small_tools/code/url_txt_to_csv.py` 默认读取 `small_tools/origin/bsky_urls_1000.txt` 并输出到 `small_tools/result`，同时修正参数未生效问题 - 2026-03-26 10:31
+- [x] 已完成并验证：调整 `base_traffic_ingestor_yjn.py`，让 bsky 入口先取任务并打印数量，再准备容器；同时自动准备 `HOST_CODE_PATH/action.py` - 2026-03-26 11:06
