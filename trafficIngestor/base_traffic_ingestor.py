@@ -76,6 +76,7 @@ class BaseTrafficIngestor(ABC):
         self._first_exec_lock = threading.Lock()
         self._first_exec_next_ts = 0.0
         self._first_exec_done_containers = set()
+        self._runtime_prepared = False
 
         # 全局统计
         self._global_start_time = 0.0
@@ -663,12 +664,13 @@ class BaseTrafficIngestor(ABC):
         self.setup()
 
         # 准备容器池
-        names = self.prepare_pool_once()
+        names: List[str] = []
 
         self._global_container_count = max(len(names), 1)
         self._global_start_time = time.time()
         self._global_ok = 0
         self._global_fail = 0
+        self._runtime_prepared = False
         batch_num = 0
 
         # 创建常驻进度条（total=None 表示未知总数）
@@ -682,6 +684,13 @@ class BaseTrafficIngestor(ABC):
                 if not jobs:
                     self.log("没有可处理的任务，退出。")
                     break
+
+                if not self._runtime_prepared:
+                    self.remove_containers()
+                    self.clear_host_code_subdirs()
+                    names = self.prepare_pool_once()
+                    self._global_container_count = max(len(names), 1)
+                    self._runtime_prepared = True
 
                 batch_num += 1
                 self.log(f"===== 批次 {batch_num}: 共 {len(jobs)} 条任务 =====")
@@ -708,7 +717,8 @@ class BaseTrafficIngestor(ABC):
             if self._pbar is not None:
                 self._pbar.close()
                 self._pbar = None
-            self.cleanup()
+            if self._runtime_prepared or self.should_cleanup_when_idle():
+                self.cleanup()
 
         # 最终汇总
         elapsed = time.time() - self._global_start_time
@@ -731,10 +741,12 @@ class BaseTrafficIngestor(ABC):
         """是否继续下一批次，子类可覆盖"""
         return True
 
+    def should_cleanup_when_idle(self) -> bool:
+        """空任务直接退出时，是否仍执行 cleanup。"""
+        return type(self).setup is not BaseTrafficIngestor.setup
+
     @classmethod
     def main(cls) -> None:
         """入口方法"""
         ingestor = cls()
-        ingestor.remove_containers()
-        ingestor.clear_host_code_subdirs()
         ingestor.run()

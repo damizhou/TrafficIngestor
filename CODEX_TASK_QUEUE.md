@@ -5,3 +5,5 @@
 - [x] 已完成并验证：将 Edge / Firefox 伪装身份从 Windows 切回 Linux 桌面版 - 2026-03-20 12:15
 - [x] 已完成并验证：新增 `small_tools/x_url_txt_to_csv.py`，支持将 `x_url.txt` 转为 `id,url,domain` CSV 并控制重复次数 - 2026-03-25 10:00
 - [x] 已完成并验证：调整 `small_tools/x_url_txt_to_csv.py` 的重复语义为“整表轮转重复且保持相同 id,url,domain” - 2026-03-25 10:08
+- [x] 已完成并验证：新增 `small_tools/copy_subpages_temp_csv.py`，将 `subpages_temp/<domain>/url_list.csv` 复制到 `subpages/<domain>/url_list.csv` - 2026-03-25 19:08
+- [x] 已完成并验证：调整 `trafficIngestor/base_traffic_ingestor.py` 执行顺序，先读取任务，仅在有任务时再创建 Docker 和做运行时清理 - 2026-03-26 09:30
