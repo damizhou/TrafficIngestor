@@ -14,7 +14,7 @@ from tools.base_action import BaseAction
 
 
 class XCaptureAction(BaseAction):
-    """X(Twitter)流量捕获Action"""
+    """流量捕获Action"""
 
     # 使用默认阈值
     pcap_lowest_size = 100000

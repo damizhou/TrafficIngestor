@@ -4,3 +4,5 @@ db/
 small_tools/result
 small_tools/origin
 *__pycache__*
+temp/
+config/

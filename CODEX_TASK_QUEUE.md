@@ -1,3 +1,6 @@
+- [x] 已完成并验证：新增 `temp/servers_txt_to_sever_info.py`，将 `temp/servers.txt` 转成 `vpns_info` Python 配置格式 - 2026-03-27 14:20
+- [x] 已完成并验证：参考 `temp` 中旧 VPN 方案调整 `traffic_capture_single_csv_clash.py` 的 Clash 启动时机 - 2026-03-27 11:18
+- [x] 已完成并验证：为 `trafficIngestor/traffic_capture_single_csv_clash.py` 增加 clash-for-linux 挂载、启动和代理采集支持 - 2026-03-27 11:12
 - [x] 已完成并验证：排查 `traffic_capture_single_csv_edge/action.py` 中 `EDGE_BACKGROUND_CAPTURE_EXCLUDE_HOSTS` 不生效原因 - 2026-03-20 11:17
 - [x] 已完成并验证：让 Edge 背景排除主机不再出现在 pcap / SNI 中 - 2026-03-20 11:25
 - [x] 已完成并验证：将 Edge Linux 无头指纹伪装为 Windows 桌面版 Edge - 2026-03-20 12:10
