@@ -28,3 +28,5 @@
 - [x] 已完成并验证：调整 `trafficIngestor_clash/traffic_capture_single_csv_clash.py`，取消共享挂载 `clash-for-linux`，改为容器创建后通过 `docker cp` 复制 Clash 目录和该容器专属 `conf/config.yaml` / `Country.mmdb`，再执行 `start.sh` 启动 Clash - 2026-03-27 17:40
 - [x] 已完成并验证：修复 `trafficIngestor_clash/traffic_capture_single_csv_clash.py` 复制到容器后的 `clash-for-linux` 脚本 CRLF 问题，并在容器内重写最小 `.env`，避免 `start.sh` 因 `$'\\r'` 和 `CLASH_URL` 占位值启动失败 - 2026-03-27 17:57
 - [x] 已完成并验证：将 `clash / fixed_ip_europe / fixed_ip_rsia` 统一到共享 Docker 网络 `traffic_ingestor_fixed_ip_net`，固定使用 `172.18.0.0/16` 和网关 `172.18.0.1`，同时让固定 IP 分配逻辑跳过网关地址 - 2026-03-27 18:10
+- [x] 已完成并验证：增强 `trafficIngestor/base_traffic_ingestor.py` 的 Docker 网络创建失败诊断，在共享固定 IP 网络与现有网段重叠时直接输出冲突网络名和子网 - 2026-03-27 18:26
+- [x] 已完成并验证：在 `trafficIngestor/base_traffic_ingestor.py` 基类中增加宿主机 `docker0` 的 offload 关闭逻辑，每次脚本运行前执行 `ethtool -K docker0 tso off gso off gro off`，失败即中止 - 2026-03-27 18:33

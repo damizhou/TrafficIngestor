@@ -220,6 +220,27 @@ class BaseTrafficIngestor(ABC):
 
         return network_info, subnets, allocated
 
+    def find_overlapping_docker_networks(
+        self,
+        target_subnet: ipaddress.IPv4Network,
+        ignore_network: Optional[str] = None,
+    ) -> List[Tuple[str, List[ipaddress.IPv4Network]]]:
+        """List existing docker networks whose IPv4 subnets overlap target_subnet."""
+        cp = self.run_cmd(["docker", "network", "ls", "--format", "{{.Name}}"])
+        if cp.returncode != 0:
+            return []
+
+        overlaps: List[Tuple[str, List[ipaddress.IPv4Network]]] = []
+        for raw_name in cp.stdout.splitlines():
+            network_name = raw_name.strip()
+            if not network_name or network_name == ignore_network:
+                continue
+            _, subnets, _ = self.inspect_docker_network(network_name)
+            matched = [subnet for subnet in subnets if subnet.overlaps(target_subnet)]
+            if matched:
+                overlaps.append((network_name, matched))
+        return overlaps
+
     def build_target_network_subnet(self) -> ipaddress.IPv4Network:
         """Build the user-defined bridge subnet from CONTAINER_IP_START."""
         if not self.CONTAINER_IP_START:
@@ -324,6 +345,13 @@ class BaseTrafficIngestor(ABC):
         ])
         if cp.returncode != 0:
             detail = (cp.stderr or cp.stdout).strip() or "unknown error"
+            overlaps = self.find_overlapping_docker_networks(subnet, ignore_network=network_name)
+            if overlaps:
+                overlap_desc = ", ".join(
+                    f"{name}({';'.join(str(item) for item in subnets)})"
+                    for name, subnets in overlaps
+                )
+                detail = f"{detail}; overlapping networks: {overlap_desc}"
             self.log(f"FATAL: failed to create docker network {network_name}: {detail}")
             sys.exit(2)
         self.log(f"created docker network: {network_name} subnet={subnet}")
@@ -496,6 +524,27 @@ class BaseTrafficIngestor(ABC):
         else:
             msg = (cp.stderr or cp.stdout).strip()
             self.log(f"WARN: {name}: 关闭包合并失败：{msg if msg else 'unknown error'}")
+
+    def disable_host_docker0_offload(self) -> None:
+        """每次运行前关闭宿主机 docker0 的 TSO/GSO/GRO。"""
+        shell = r'''
+            set -e
+            if ! command -v ethtool >/dev/null 2>&1; then
+                echo "ethtool not found" >&2
+                exit 1
+            fi
+            if [ "$(id -u)" -eq 0 ]; then
+                ethtool -K docker0 tso off gso off gro off
+            else
+                sudo ethtool -K docker0 tso off gso off gro off
+            fi
+        '''
+        cp = self.run_cmd(["sh", "-lc", shell])
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout).strip() or "unknown error"
+            self.log(f"FATAL: failed to disable docker0 offload: {detail}")
+            sys.exit(2)
+        self.log("docker0: offload disabled (TSO/GSO/GRO off)")
 
     def remove_containers(self) -> None:
         """删除所有同前缀的容器"""
@@ -966,6 +1015,7 @@ class BaseTrafficIngestor(ABC):
 
         # 初始化（子类可覆盖 setup 方法）
         self.setup()
+        self.disable_host_docker0_offload()
 
         # 准备容器池
         names: List[str] = []
