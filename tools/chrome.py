@@ -79,7 +79,8 @@ def is_docker():
 
 
 def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
-                          enable_ssl_key_log=True, data_base_dir=None):
+                          enable_ssl_key_log=True, data_base_dir=None,
+                          proxy_server=None, proxy_bypass_list=None):
     """
     创建Chrome浏览器驱动
 
@@ -89,6 +90,8 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
         parsers: 解析器名称/前缀
         enable_ssl_key_log: 是否启用SSL密钥日志（默认True）
         data_base_dir: 数据基础目录，默认为项目根目录下的相对路径
+        proxy_server: 可选的浏览器代理地址，如 http://127.0.0.1:7890
+        proxy_bypass_list: 可选的代理绕过列表，如 127.0.0.1;localhost
 
     Returns:
         browser: WebDriver实例
@@ -146,6 +149,10 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
     chrome_options.add_argument("--homepage=about:blank")
     chrome_options.add_argument("--log-net-log=/tmp/netlog.json")
     chrome_options.add_argument("--net-log-capture-mode=Everything")
+    if proxy_server:
+        chrome_options.add_argument(f"--proxy-server={proxy_server}")
+    if proxy_bypass_list:
+        chrome_options.add_argument(f"--proxy-bypass-list={proxy_bypass_list}")
 
     # SSL密钥日志
     if ssl_key_file_path:

@@ -134,13 +134,128 @@ class BaseTrafficIngestor(ABC):
             self.log(f"FATAL: 非法的容器起始 IP：{self.CONTAINER_IP_START} -> {e}")
             sys.exit(2)
 
+    def get_target_docker_network(self) -> str:
+        """返回固定 IP 所在的目标 Docker 网络名。"""
+        return self.DOCKER_NETWORK or "bridge"
+
+    def inspect_target_network(self) -> Tuple[List[ipaddress.IPv4Network], Dict[str, str]]:
+        """读取目标 Docker 网络上的 IPv4 子网与已分配地址。"""
+        network_name = self.get_target_docker_network()
+        cp = self.run_cmd(["docker", "network", "inspect", network_name])
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout).strip() or "unknown error"
+            self.log(f"WARN: 无法读取 Docker 网络 {network_name}：{detail}")
+            return [], {}
+
+        try:
+            payload = json.loads(cp.stdout)
+            network_info = payload[0] if payload else {}
+        except (json.JSONDecodeError, IndexError, TypeError) as e:
+            self.log(f"WARN: 解析 Docker 网络 {network_name} 失败：{e}")
+            return [], {}
+
+        subnets: List[ipaddress.IPv4Network] = []
+        for item in network_info.get("IPAM", {}).get("Config", []):
+            subnet = str(item.get("Subnet", "")).strip()
+            if not subnet:
+                continue
+            try:
+                subnets.append(ipaddress.ip_network(subnet, strict=False))
+            except ValueError:
+                self.log(f"WARN: 忽略非法 Docker 子网配置：{subnet}")
+
+        allocated: Dict[str, str] = {}
+        for container in (network_info.get("Containers") or {}).values():
+            name = str(container.get("Name", "")).strip()
+            ipv4 = str(container.get("IPv4Address", "")).split("/", 1)[0].strip()
+            if not name or not ipv4:
+                continue
+            try:
+                ipaddress.IPv4Address(ipv4)
+            except ValueError:
+                continue
+            allocated[name] = ipv4
+
+        return subnets, allocated
+
+    def is_usable_container_ip(
+        self,
+        candidate: ipaddress.IPv4Address,
+        subnets: List[ipaddress.IPv4Network]
+    ) -> bool:
+        """判断候选 IP 是否落在目标子网内且不是网络/广播地址。"""
+        if not subnets:
+            return True
+        for subnet in subnets:
+            if candidate not in subnet:
+                continue
+            if candidate == subnet.network_address:
+                return False
+            if subnet.num_addresses > 1 and candidate == subnet.broadcast_address:
+                return False
+            return True
+        return False
+
+    def build_container_specs(self, names: List[str]) -> List[Tuple[int, str, Optional[str]]]:
+        """为容器池分配固定 IP，自动跳过已占用或不可用地址。"""
+        specs = [(index, name, self.build_container_ip(index)) for index, name in enumerate(names)]
+        if not specs or specs[0][2] is None:
+            return specs
+
+        try:
+            start_ip = ipaddress.IPv4Address(self.CONTAINER_IP_START)
+        except ValueError as e:
+            self.log(f"FATAL: 非法的容器起始 IP：{self.CONTAINER_IP_START} -> {e}")
+            sys.exit(2)
+
+        subnets, allocated = self.inspect_target_network()
+        used_ips = {
+            ipaddress.IPv4Address(ip)
+            for ip in allocated.values()
+        }
+        assigned: Dict[str, str] = {}
+        reserved_ips: List[ipaddress.IPv4Address] = []
+
+        for name in names:
+            current_ip = allocated.get(name)
+            if not current_ip:
+                continue
+            current_addr = ipaddress.IPv4Address(current_ip)
+            if current_addr < start_ip:
+                continue
+            if not self.is_usable_container_ip(current_addr, subnets):
+                continue
+            assigned[name] = current_ip
+            reserved_ips.append(current_addr)
+
+        next_ip = start_ip
+        if reserved_ips:
+            next_ip = ipaddress.IPv4Address(max(int(ip) for ip in reserved_ips) + 1)
+
+        for _, name, _ in specs:
+            if name in assigned:
+                continue
+            while next_ip in used_ips or not self.is_usable_container_ip(next_ip, subnets):
+                next_ip += 1
+            assigned[name] = str(next_ip)
+            used_ips.add(next_ip)
+            next_ip += 1
+
+        resolved_specs = [(index, name, assigned[name]) for index, name, _ in specs]
+        if resolved_specs and resolved_specs[0][2] != specs[0][2]:
+            self.log(
+                f"WARN: 固定 IP 自动顺延，起始配置={specs[0][2]}，"
+                f"实际首个可用地址={resolved_specs[0][2]}"
+            )
+        return resolved_specs
+
     def get_container_ipv4(self, name: str) -> Optional[str]:
         """获取容器当前 IPv4 地址。"""
-        cp = self.run_cmd([
-            "docker", "inspect", "-f",
-            "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}",
-            name
-        ])
+        if self.DOCKER_NETWORK:
+            inspect_expr = f'{{{{with index .NetworkSettings.Networks "{self.DOCKER_NETWORK}"}}}}{{{{.IPAddress}}}}{{{{end}}}}'
+        else:
+            inspect_expr = "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}"
+        cp = self.run_cmd(["docker", "inspect", "-f", inspect_expr, name])
         if cp.returncode != 0:
             return None
         values = cp.stdout.strip().split()
@@ -278,7 +393,7 @@ class BaseTrafficIngestor(ABC):
         names = self.build_container_names()
         self.log("checking and creating containers...")
         self.log(f"容器池规模={len(names)}: {names[0]} … {names[-1]}")
-        container_specs = [(index, name, self.build_container_ip(index)) for index, name in enumerate(names)]
+        container_specs = self.build_container_specs(names)
         if container_specs and container_specs[0][2] is not None:
             self.log(f"固定 IP 范围={container_specs[0][2]} -> {container_specs[-1][2]}")
 

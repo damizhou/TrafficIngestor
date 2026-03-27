@@ -14,3 +14,11 @@
 - [x] 已完成并验证：调整 `small_tools/code/url_txt_to_csv.py` 默认读取 `small_tools/origin/bsky_urls_1000.txt` 并输出到 `small_tools/result`，同时修正参数未生效问题 - 2026-03-26 10:31
 - [x] 已完成并验证：调整 `base_traffic_ingestor_yjn.py`，让 bsky 入口先取任务并打印数量，再准备容器；同时自动准备 `HOST_CODE_PATH/action.py` - 2026-03-26 11:06
 - [x] 已完成并验证：跟进 `traffic_capture_single_csv_bsky.py` 切回主基类后的执行可观测性，补充主基类容器创建前日志与 `HOST_CODE_PATH` 准备接线 - 2026-03-26 11:17
+- [x] 已完成并验证：让 `trafficIngestor/traffic_capture_single_csv_clash.py` 从 `config/sever_info.py` 读取节点，并按容器循环分配 VPN 节点 - 2026-03-27 15:34
+- [x] 已完成并验证：仅为 `traffic_capture_single_csv_clash/action.py` 对应的 Chrome 显式注入 Clash 代理 `chrome_options` - 2026-03-27 15:34
+- [x] 已完成并验证：为 `trafficIngestor/traffic_capture_single_csv_clash.py` 增加固定容器 IP 起始地址 `172.17.150.0` - 2026-03-27 15:55
+- [x] 已完成并验证：让 `trafficIngestor/traffic_capture_single_csv_clash.py` 在容器准备阶段一次启动 Clash，并移除 `docker exec` 的代理环境变量注入 - 2026-03-27 16:14
+- [x] 已完成并验证：对比 `trafficIngestor/traffic_capture_single_csv.py` 清理 `trafficIngestor/traffic_capture_single_csv_clash.py` 中与基类重复的空回调和 `exec_once` 覆盖 - 2026-03-27 16:29
+- [x] 已完成并验证：让 `trafficIngestor/traffic_capture_single_csv_clash.py` 基于 `config/config.yaml` 模板替换节点信息生成每容器 `config.yaml`，移除手写 YAML 生成逻辑 - 2026-03-27 16:33
+- [x] 已完成并验证：收紧 `trafficIngestor/traffic_capture_single_csv_clash.py` 的模板替换范围，仅替换 `config/config.yaml` 中单条占位节点定义并保留固定名 `vpnnodename` - 2026-03-27 16:38
+- [x] 已完成并验证：为 `trafficIngestor/base_traffic_ingestor.py` 增加固定容器 IP 自动顺延逻辑，跳过目标 Docker 网络中已占用或不可用的地址 - 2026-03-27 16:49

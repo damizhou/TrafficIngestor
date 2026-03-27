@@ -70,7 +70,9 @@ class BaseAction(ABC):
         """创建浏览器驱动，子类可覆盖。"""
         return create_chrome_driver(
             self.allowed_domain, formatted_time, f"{row_id}",
-            data_base_dir=_project_root
+            data_base_dir=_project_root,
+            proxy_server=self.get_browser_proxy_server(),
+            proxy_bypass_list=self.get_browser_proxy_bypass_list(),
         )
 
     def open_and_save_content(self, browser, url, ssl_key_file_path):
@@ -83,6 +85,14 @@ class BaseAction(ABC):
     def get_capture_exclude_hosts(self):
         """返回需要从抓包中排除的主机列表，子类可覆盖。"""
         return ()
+
+    def get_browser_proxy_server(self):
+        """返回浏览器代理地址；默认不启用浏览器级代理。"""
+        return None
+
+    def get_browser_proxy_bypass_list(self):
+        """返回浏览器代理绕过列表；默认不设置。"""
+        return None
 
     def clean_old_files(self, meta_path):
         """清理旧文件"""
