@@ -61,9 +61,11 @@ id,url,domain
 - `python trafficIngestor/traffic_capture_single_csv.py`
   Chrome 批量流量采集
 - `python trafficIngestor/traffic_capture_single_csv_fixed_ip_europe.py`
-  Chrome 批量流量采集，容器 IP 从 `172.18.50.10` 开始递增
+  Chrome 批量流量采集，容器挂到共享网络 `traffic_ingestor_fixed_ip_net`，IP 从 `172.18.50.10` 开始递增
 - `python trafficIngestor/traffic_capture_single_csv_fixed_ip_rsia.py`
-  Chrome 批量流量采集，容器 IP 从 `172.18.70.10` 开始递增
+  Chrome 批量流量采集，容器挂到共享网络 `traffic_ingestor_fixed_ip_net`，IP 从 `172.18.70.10` 开始递增
+- `python trafficIngestor_clash/traffic_capture_single_csv_clash.py`
+  Chrome + Clash 批量流量采集，容器挂到共享网络 `traffic_ingestor_fixed_ip_net`，IP 从 `172.18.150.0` 起始段自动顺延
 - `python trafficIngestor/traffic_capture_single_csv_edge.py`
   Edge 测试或定向采集
 - `python trafficIngestor/traffic_capture_single_csv_firefox.py`
@@ -96,9 +98,11 @@ id,url,domain
 - `DOCKER_IMAGE`：容器镜像
 - `RETRY`：失败重试次数
 - `DOCKER_NETWORK`：固定 IP 模式使用的 Docker 自定义网络名
+- `DOCKER_NETWORK_SUBNET_PREFIX`：固定 IP 模式的 Docker 子网前缀长度
+- `DOCKER_NETWORK_GATEWAY`：固定 IP 模式的 Docker 网关地址
 - `CONTAINER_IP_START`：可选，按容器序号递增分配固定 IPv4
 
-固定 IP 入口默认会绑定到独立的 Docker 用户自定义网络；若目标网络不存在，基类会按 `CONTAINER_IP_START` 和 `/24` 子网自动创建。当前仓库中的示例入口分别从 `172.18.50.10`、`172.18.70.10` 和 `172.18.150.10` 开始分配地址，避免与默认 `bridge` 网络的常见 `172.17.0.0/16` 段冲突。
+当前固定 IP 入口统一复用共享 Docker 网络 `traffic_ingestor_fixed_ip_net`；若目标网络不存在，基类会按 `CONTAINER_IP_START`、`DOCKER_NETWORK_SUBNET_PREFIX` 和 `DOCKER_NETWORK_GATEWAY` 自动创建。仓库中的示例入口目前统一使用 `172.18.0.0/16`，网关固定为 `172.18.0.1`，并分别从 `172.18.50.10`、`172.18.70.10` 和 `172.18.150.0` 起始段分配地址。
 
 ### 数据库采集任务
 数据库模式使用 `db/db_config.ini`。需要提供 `mysql` 配置节，并包含：

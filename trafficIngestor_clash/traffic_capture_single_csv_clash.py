@@ -3,8 +3,8 @@
 """
 traffic_capture_single_csv_clash.py
 
-从 CSV 读取 URL，使用容器池并发采集流量数据。
-每个 Docker 容器绑定一个 VPN 节点，节点分配完一轮后继续循环分配。
+Read URLs from CSV and capture traffic with a container pool.
+Each container is assigned a dedicated Clash node.
 """
 
 import json
@@ -15,7 +15,6 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-# 添加项目根目录到路径
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
@@ -26,34 +25,26 @@ from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor, get_real_
 
 
 class TrafficIngestor(BaseTrafficIngestor):
-    """流量采集器。"""
-
-    # ============== 配置 ==============
-    BASE_NAME = 'traffic_capture_single_csv_clash'
+    BASE_NAME = "traffic_capture_single_csv_clash"
+    SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_net"
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
-    CONTAINER_COUNT = 15
+    CONTAINER_COUNT = 15 * 30
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-    BASE_DST = '/netdisk/test'
+    BASE_DST = "/netdisk2/ww/trojan/top200000/chrome"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
-    DOCKER_NETWORK = f"{CONTAINER_PREFIX}_net"
-    CONTAINER_IP_START = "172.18.150.10"
-    CLASH_HOST_PATH = os.path.join(_project_root, 'clash-for-linux')
+    DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
+    DOCKER_NETWORK_SUBNET_PREFIX = 16
+    DOCKER_NETWORK_GATEWAY = "172.18.0.1"
+    CONTAINER_IP_START = "172.18.150.0"
+    CLASH_HOST_PATH = os.path.join(_project_root, "clash-for-linux")
     CLASH_CONTAINER_PATH = f"{BaseTrafficIngestor.CONTAINER_CODE_PATH}/clash-for-linux"
     CLASH_PORT = 7890
     CLASH_READY_TIMEOUT = 60
     CLASH_START_TIMEOUT = 180
     CLASH_RUNTIME_DIR_NAME = "clash_runtime"
     CLASH_TEMPLATE_CONFIG_PATH = os.path.join(_project_root, "config", "config.yaml")
-
-    # CSV 必须包含表头，字段名（大小写不敏感）：
-    # - id: 唯一标识，用于任务完成/失败后从 CSV 删除对应行
-    # - url: 访问地址（建议完整 URL，包含 http:// 或 https://）
-    # - domain: 域名（用于日志与流量采集标识）
-    # 示例：
-    # id,url,domain
-    # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'test.csv')
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "top300000_ingestor.csv")
 
     def __init__(self):
         super().__init__()
@@ -61,7 +52,6 @@ class TrafficIngestor(BaseTrafficIngestor):
         self._vpns = self._load_vpns()
 
     def _load_vpns(self) -> List[Dict[str, Any]]:
-        """从 config/sever_info.py 读取并校验节点信息。"""
         if not isinstance(vpns_info, list) or not vpns_info:
             raise RuntimeError("config/sever_info.py 中的 vpns_info 不能为空")
 
@@ -105,7 +95,6 @@ class TrafficIngestor(BaseTrafficIngestor):
             raise RuntimeError(f"无法从容器名解析序号: {name}") from e
 
     def get_vpn_for_container(self, name: str) -> Dict[str, Any]:
-        """为容器按序号循环分配节点。"""
         container_index = self._get_container_index(name)
         return self._vpns[container_index % len(self._vpns)]
 
@@ -116,7 +105,6 @@ class TrafficIngestor(BaseTrafficIngestor):
         return f"{self.CONTAINER_CODE_PATH}/{self.CLASH_RUNTIME_DIR_NAME}/{name}"
 
     def render_clash_config(self, name: str) -> str:
-        """基于 config/config.yaml 模板替换节点占位内容。"""
         vpn = dict(self.get_vpn_for_container(name))
         vpn["name"] = "vpnnodename"
         template_path = Path(self.CLASH_TEMPLATE_CONFIG_PATH)
@@ -136,7 +124,6 @@ class TrafficIngestor(BaseTrafficIngestor):
         return config_text
 
     def write_clash_runtime_config(self, name: str) -> None:
-        """为容器写入独立的 Clash 运行目录和配置。"""
         runtime_dir = self.get_clash_runtime_host_dir(name)
         runtime_dir.mkdir(parents=True, exist_ok=True)
 
@@ -151,13 +138,13 @@ class TrafficIngestor(BaseTrafficIngestor):
             os.link(country_mmdb, runtime_mmdb)
         except OSError:
             shutil.copy2(country_mmdb, runtime_mmdb)
+
         config_text = self.render_clash_config(name)
         if not config_text.endswith("\n"):
             config_text += "\n"
         (runtime_dir / "config.yaml").write_text(config_text, encoding="utf-8")
 
     def prepare_pool_once(self) -> List[str]:
-        """在创建容器前先准备每个容器自己的 Clash 配置。"""
         if not os.path.isdir(self.CLASH_HOST_PATH):
             self.log(f"FATAL: clash-for-linux 目录不存在: {self.CLASH_HOST_PATH}")
             sys.exit(2)
@@ -174,8 +161,10 @@ class TrafficIngestor(BaseTrafficIngestor):
             f"共使用 {len(self._vpns)} 个节点，"
             f"按容器序号循环分配: {names[0]}->{first_vpn}, {names[-1]}->{last_vpn}"
         )
+
         names = super().prepare_pool_once()
         for name in names:
+            self.sync_clash_files_to_container(name)
             self.ensure_clash_ready(name)
         return names
 
@@ -184,15 +173,10 @@ class TrafficIngestor(BaseTrafficIngestor):
         name: str,
         host_code_path: str,
         image: str,
-        container_ip: str | None = None
+        container_ip: str | None = None,
     ) -> None:
-        """创建容器，同时挂载采集代码、tools 和 clash-for-linux。"""
         uid, gid = str(os.getuid()), str(os.getgid())
-        tools_path = os.path.join(_project_root, 'tools')
-        clash_path = self.CLASH_HOST_PATH
-        if not os.path.isdir(clash_path):
-            self.log(f"FATAL: clash-for-linux 目录不存在: {clash_path}")
-            sys.exit(2)
+        tools_path = os.path.join(_project_root, "tools")
 
         self.log(f"creating container: {name}")
         cmd = [
@@ -201,7 +185,6 @@ class TrafficIngestor(BaseTrafficIngestor):
             "--dns", "172.17.0.1",
             "--volume", f"{host_code_path}:{self.CONTAINER_CODE_PATH}",
             "--volume", f"{tools_path}:{self.CONTAINER_CODE_PATH}/tools",
-            "--volume", f"{clash_path}:{self.CLASH_CONTAINER_PATH}",
             "-e", f"HOST_UID={uid}",
             "-e", f"HOST_GID={gid}",
             "--privileged",
@@ -226,8 +209,72 @@ class TrafficIngestor(BaseTrafficIngestor):
         else:
             self.log(f"created container: {name}")
 
+    def sync_clash_files_to_container(self, name: str) -> None:
+        clash_path = Path(self.CLASH_HOST_PATH)
+        runtime_dir = self.get_clash_runtime_host_dir(name)
+        config_path = runtime_dir / "config.yaml"
+        country_mmdb = runtime_dir / "Country.mmdb"
+
+        if not clash_path.is_dir():
+            self.log(f"FATAL: clash-for-linux 目录不存在: {clash_path}")
+            sys.exit(2)
+        if not config_path.is_file():
+            self.log(f"FATAL: clash config 不存在: {config_path}")
+            sys.exit(2)
+        if not country_mmdb.is_file():
+            self.log(f"FATAL: Country.mmdb 不存在: {country_mmdb}")
+            sys.exit(2)
+
+        prepare_shell = f"""
+set -e
+mkdir -p "{self.CONTAINER_CODE_PATH}"
+rm -rf "{self.CLASH_CONTAINER_PATH}"
+"""
+        cp = self.run_cmd(["docker", "exec", name, "bash", "-lc", prepare_shell])
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
+            self.log(f"FATAL: {name} 准备 clash 目录失败: {detail}")
+            sys.exit(2)
+
+        copy_steps = [
+            (["docker", "cp", str(clash_path), f"{name}:{self.CONTAINER_CODE_PATH}"], "copy clash-for-linux"),
+            (["docker", "cp", str(config_path), f"{name}:{self.CLASH_CONTAINER_PATH}/conf/config.yaml"], "copy config.yaml"),
+            (["docker", "cp", str(country_mmdb), f"{name}:{self.CLASH_CONTAINER_PATH}/conf/Country.mmdb"], "copy Country.mmdb"),
+        ]
+        for cmd, desc in copy_steps:
+            cp = self.run_cmd(cmd)
+            if cp.returncode != 0:
+                detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
+                self.log(f"FATAL: {name} {desc} 失败: {detail}")
+                sys.exit(2)
+
+        normalize_shell = f"""
+set -e
+python - <<'PY'
+from pathlib import Path
+
+root = Path({self.CLASH_CONTAINER_PATH!r})
+for path in root.rglob("*"):
+    if not path.is_file():
+        continue
+    if path.suffix == ".sh" or path.name == ".env":
+        data = path.read_bytes().replace(b"\\r\\n", b"\\n").replace(b"\\r", b"\\n")
+        path.write_bytes(data)
+
+(root / ".env").write_text(
+    "export CLASH_URL='http://127.0.0.1:1/unused'\\n"
+    "export CLASH_SECRET=''\\n",
+    encoding="utf-8",
+)
+PY
+"""
+        cp = self.run_cmd(["docker", "exec", name, "bash", "-lc", normalize_shell])
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
+            self.log(f"FATAL: {name} normalize clash files failed: {detail}")
+            sys.exit(2)
+
     def fetch_jobs(self) -> List[Dict[str, str]]:
-        """从 CSV 读取任务。"""
         if not self._has_jobs:
             return []
 
@@ -237,18 +284,18 @@ class TrafficIngestor(BaseTrafficIngestor):
         return jobs
 
     def should_continue(self) -> bool:
-        """只运行一次。"""
         return False
 
     def ensure_clash_ready(self, name: str) -> None:
-        """在容器内按专属配置启动 Clash。"""
         runtime_dir = self.get_clash_runtime_container_dir(name)
         shell = f"""
 set -e
 CLASH_DIR="{self.CLASH_CONTAINER_PATH}"
 RUNTIME_DIR="{runtime_dir}"
-CONFIG_FILE="$RUNTIME_DIR/config.yaml"
-LOG_FILE="$RUNTIME_DIR/clash.stdout.log"
+CONFIG_FILE="$CLASH_DIR/conf/config.yaml"
+MMDB_FILE="$CLASH_DIR/conf/Country.mmdb"
+START_LOG="$RUNTIME_DIR/clash.start.log"
+LOG_FILE="$CLASH_DIR/logs/clash.log"
 
 if [ ! -d "$CLASH_DIR" ]; then
     echo "clash directory not found: $CLASH_DIR" >&2
@@ -258,8 +305,8 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo "clash config not found: $CONFIG_FILE" >&2
     exit 1
 fi
-if [ ! -f "$RUNTIME_DIR/Country.mmdb" ]; then
-    echo "Country.mmdb not found: $RUNTIME_DIR/Country.mmdb" >&2
+if [ ! -f "$MMDB_FILE" ]; then
+    echo "Country.mmdb not found: $MMDB_FILE" >&2
     exit 1
 fi
 
@@ -267,29 +314,12 @@ if python -c "import socket; s = socket.create_connection(('127.0.0.1', {self.CL
     exit 0
 fi
 
-if command -v pkill >/dev/null 2>&1; then
-    pkill -f 'clash-linux-' >/dev/null 2>&1 || true
+rm -f "$START_LOG" "$LOG_FILE"
+if ! bash "$CLASH_DIR/start.sh" >"$START_LOG" 2>&1; then
+    cat "$START_LOG" >&2 || true
+    cat "$LOG_FILE" >&2 || true
+    exit 1
 fi
-
-case "$(uname -m)" in
-    x86_64|amd64)
-        CLASH_BIN="$CLASH_DIR/bin/clash-linux-amd64"
-        ;;
-    aarch64|arm64)
-        CLASH_BIN="$CLASH_DIR/bin/clash-linux-arm64"
-        ;;
-    armv7|armv7l)
-        CLASH_BIN="$CLASH_DIR/bin/clash-linux-armv7"
-        ;;
-    *)
-        echo "unsupported cpu architecture: $(uname -m)" >&2
-        exit 1
-        ;;
-esac
-
-chmod +x "$CLASH_BIN"
-rm -f "$LOG_FILE"
-nohup "$CLASH_BIN" -d "$RUNTIME_DIR" >"$LOG_FILE" 2>&1 &
 
 for _ in $(seq 1 {self.CLASH_READY_TIMEOUT}); do
     python -c "import socket; s = socket.create_connection(('127.0.0.1', {self.CLASH_PORT}), timeout=1); s.close()" >/dev/null 2>&1 && exit 0
@@ -297,12 +327,13 @@ for _ in $(seq 1 {self.CLASH_READY_TIMEOUT}); do
 done
 
 echo "clash startup timeout" >&2
+cat "$START_LOG" >&2 || true
 cat "$LOG_FILE" >&2 || true
 exit 1
 """
         cp = self.run_cmd(["docker", "exec", name, "bash", "-lc", shell], timeout=self.CLASH_START_TIMEOUT)
         if cp.returncode != 0:
-            detail = (cp.stderr or cp.stdout).strip() or "unknown error"
+            detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
             self.log(f"FATAL: {name} 启动 clash 失败: {detail}")
             sys.exit(2)
 
@@ -310,7 +341,6 @@ exit 1
         self.log(f"{name}: clash is ready with vpn={vpn_name}")
 
     def cleanup(self) -> None:
-        """清理容器。"""
         import time
         time.sleep(60)
         self.remove_containers()
@@ -318,7 +348,3 @@ exit 1
 
 if __name__ == "__main__":
     TrafficIngestor.main()
-    # TrafficIngestor.main()
-    # TrafficIngestor.main()
-    # TrafficIngestor.main()
-    # TrafficIngestor.main()

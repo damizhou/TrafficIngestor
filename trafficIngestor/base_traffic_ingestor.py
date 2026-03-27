@@ -66,6 +66,7 @@ class BaseTrafficIngestor(ABC):
     DOCKER_NETWORK: Optional[str] = None
     CONTAINER_IP_START: Optional[str] = None
     DOCKER_NETWORK_SUBNET_PREFIX: int = 24
+    DOCKER_NETWORK_GATEWAY: Optional[str] = None
     DEFAULT_UID: int = int(os.environ.get('SUDO_UID', os.getuid()))
     DEFAULT_GID: int = int(os.environ.get('SUDO_GID', os.getgid()))
     CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH: bool = True
@@ -237,7 +238,30 @@ class BaseTrafficIngestor(ABC):
             sys.exit(2)
 
     def build_target_network_gateway(self, subnet: ipaddress.IPv4Network) -> str:
-        """Pick a gateway near the tail of the subnet to avoid low host collisions."""
+        """Return the configured gateway or derive one from the target subnet."""
+        if self.DOCKER_NETWORK_GATEWAY:
+            try:
+                gateway = ipaddress.IPv4Address(self.DOCKER_NETWORK_GATEWAY)
+            except ValueError as e:
+                self.log(
+                    "FATAL: invalid docker network gateway config: "
+                    f"{self.DOCKER_NETWORK_GATEWAY} -> {e}"
+                )
+                sys.exit(2)
+            if gateway not in subnet:
+                self.log(
+                    "FATAL: docker network gateway is outside subnet: "
+                    f"gateway={gateway} subnet={subnet}"
+                )
+                sys.exit(2)
+            if gateway == subnet.network_address or gateway == subnet.broadcast_address:
+                self.log(
+                    "FATAL: docker network gateway cannot be the network/broadcast address: "
+                    f"gateway={gateway} subnet={subnet}"
+                )
+                sys.exit(2)
+            return str(gateway)
+
         if subnet.num_addresses < 4:
             self.log(f"FATAL: docker subnet is too small: {subnet}")
             sys.exit(2)
@@ -271,6 +295,19 @@ class BaseTrafficIngestor(ABC):
                 self.log(
                     f"FATAL: fixed IP start {self.CONTAINER_IP_START} is outside docker network "
                     f"{network_name} IPv4 subnets: {subnet_desc}"
+                )
+                sys.exit(2)
+
+            expected_gateway = self.build_target_network_gateway(subnets[0])
+            existing_gateways = []
+            for item in network_info.get("IPAM", {}).get("Config", []):
+                gateway = str(item.get("Gateway", "")).strip()
+                if gateway:
+                    existing_gateways.append(gateway)
+            if existing_gateways and expected_gateway not in existing_gateways:
+                self.log(
+                    f"FATAL: docker network {network_name} gateway mismatch: "
+                    f"expected={expected_gateway}, actual={', '.join(existing_gateways)}"
                 )
                 sys.exit(2)
             return
@@ -326,6 +363,11 @@ class BaseTrafficIngestor(ABC):
             ipaddress.IPv4Address(ip)
             for ip in allocated.values()
         }
+        if self.DOCKER_NETWORK:
+            gateway_ip = ipaddress.IPv4Address(
+                self.build_target_network_gateway(self.build_target_network_subnet())
+            )
+            used_ips.add(gateway_ip)
         assigned: Dict[str, str] = {}
         reserved_ips: List[ipaddress.IPv4Address] = []
 

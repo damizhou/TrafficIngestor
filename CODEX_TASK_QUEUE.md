@@ -23,3 +23,8 @@
 - [x] 已完成并验证：收紧 `trafficIngestor/traffic_capture_single_csv_clash.py` 的模板替换范围，仅替换 `config/config.yaml` 中单条占位节点定义并保留固定名 `vpnnodename` - 2026-03-27 16:38
 - [x] 已完成并验证：为 `trafficIngestor/base_traffic_ingestor.py` 增加固定容器 IP 自动顺延逻辑，跳过目标 Docker 网络中已占用或不可用的地址 - 2026-03-27 16:49
 - [x] 已完成并验证：为固定 IP 采集器补齐 Docker 自定义网络自动创建逻辑，并将 clash / europe / rsia 入口切换到 `172.18.x.x` 独立网段 - 2026-03-27 17:14
+- [x] 已完成并验证：修复 `trafficIngestor_clash/traffic_capture_single_csv_clash.py` 中 `pkill -f 'clash-linux-'` 误杀当前 `docker exec bash` 导致 Clash 无输出启动失败的问题，并补充返回码诊断 - 2026-03-27 17:27
+- [x] 已完成并验证：按运行约束移除 `trafficIngestor_clash/traffic_capture_single_csv_clash.py` 中无必要的 Clash 旧进程清理逻辑，保留启动失败返回码诊断 - 2026-03-27 17:31
+- [x] 已完成并验证：调整 `trafficIngestor_clash/traffic_capture_single_csv_clash.py`，取消共享挂载 `clash-for-linux`，改为容器创建后通过 `docker cp` 复制 Clash 目录和该容器专属 `conf/config.yaml` / `Country.mmdb`，再执行 `start.sh` 启动 Clash - 2026-03-27 17:40
+- [x] 已完成并验证：修复 `trafficIngestor_clash/traffic_capture_single_csv_clash.py` 复制到容器后的 `clash-for-linux` 脚本 CRLF 问题，并在容器内重写最小 `.env`，避免 `start.sh` 因 `$'\\r'` 和 `CLASH_URL` 占位值启动失败 - 2026-03-27 17:57
+- [x] 已完成并验证：将 `clash / fixed_ip_europe / fixed_ip_rsia` 统一到共享 Docker 网络 `traffic_ingestor_fixed_ip_net`，固定使用 `172.18.0.0/16` 和网关 `172.18.0.1`，同时让固定 IP 分配逻辑跳过网关地址 - 2026-03-27 18:10
