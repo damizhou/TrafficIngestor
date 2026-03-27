@@ -65,6 +65,7 @@ class BaseTrafficIngestor(ABC):
     FIRST_EXEC_INTERVAL: float = 1.0
     DOCKER_NETWORK: Optional[str] = None
     CONTAINER_IP_START: Optional[str] = None
+    DOCKER_NETWORK_SUBNET_PREFIX: int = 24
     DEFAULT_UID: int = int(os.environ.get('SUDO_UID', os.getuid()))
     DEFAULT_GID: int = int(os.environ.get('SUDO_GID', os.getgid()))
     CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH: bool = True
@@ -178,6 +179,118 @@ class BaseTrafficIngestor(ABC):
 
         return subnets, allocated
 
+    def inspect_docker_network(
+        self,
+        network_name: str,
+    ) -> Tuple[Optional[Dict[str, Any]], List[ipaddress.IPv4Network], Dict[str, str]]:
+        """Read a Docker network and collect IPv4 subnet/allocation info."""
+        cp = self.run_cmd(["docker", "network", "inspect", network_name])
+        if cp.returncode != 0:
+            return None, [], {}
+
+        try:
+            payload = json.loads(cp.stdout)
+            network_info = payload[0] if payload else {}
+        except (json.JSONDecodeError, IndexError, TypeError) as e:
+            self.log(f"WARN: failed to parse docker network {network_name}: {e}")
+            return None, [], {}
+
+        subnets: List[ipaddress.IPv4Network] = []
+        for item in network_info.get("IPAM", {}).get("Config", []):
+            subnet = str(item.get("Subnet", "")).strip()
+            if not subnet:
+                continue
+            try:
+                subnets.append(ipaddress.ip_network(subnet, strict=False))
+            except ValueError:
+                self.log(f"WARN: ignore invalid docker subnet config: {subnet}")
+
+        allocated: Dict[str, str] = {}
+        for container in (network_info.get("Containers") or {}).values():
+            name = str(container.get("Name", "")).strip()
+            ipv4 = str(container.get("IPv4Address", "")).split("/", 1)[0].strip()
+            if not name or not ipv4:
+                continue
+            try:
+                ipaddress.IPv4Address(ipv4)
+            except ValueError:
+                continue
+            allocated[name] = ipv4
+
+        return network_info, subnets, allocated
+
+    def build_target_network_subnet(self) -> ipaddress.IPv4Network:
+        """Build the user-defined bridge subnet from CONTAINER_IP_START."""
+        if not self.CONTAINER_IP_START:
+            raise RuntimeError("CONTAINER_IP_START is required for fixed-IP network setup")
+        try:
+            prefix = int(self.DOCKER_NETWORK_SUBNET_PREFIX)
+            if prefix < 16 or prefix > 30:
+                raise ValueError(f"invalid prefix: {prefix}")
+            return ipaddress.ip_network(f"{self.CONTAINER_IP_START}/{prefix}", strict=False)
+        except ValueError as e:
+            self.log(
+                "FATAL: invalid docker network subnet config: "
+                f"CONTAINER_IP_START={self.CONTAINER_IP_START}, "
+                f"prefix={self.DOCKER_NETWORK_SUBNET_PREFIX} -> {e}"
+            )
+            sys.exit(2)
+
+    def build_target_network_gateway(self, subnet: ipaddress.IPv4Network) -> str:
+        """Pick a gateway near the tail of the subnet to avoid low host collisions."""
+        if subnet.num_addresses < 4:
+            self.log(f"FATAL: docker subnet is too small: {subnet}")
+            sys.exit(2)
+        gateway = ipaddress.IPv4Address(int(subnet.broadcast_address) - 1)
+        if gateway == subnet.network_address:
+            gateway = ipaddress.IPv4Address(int(subnet.network_address) + 1)
+        return str(gateway)
+
+    def ensure_target_network_ready(self) -> None:
+        """Create the user-defined Docker network for fixed-IP containers if needed."""
+        if not self.CONTAINER_IP_START:
+            return
+
+        network_name = self.get_target_docker_network()
+        if network_name == "bridge":
+            self.log(
+                "FATAL: CONTAINER_IP_START is set but DOCKER_NETWORK is missing. "
+                "Docker default bridge does not support explicit --ip."
+            )
+            sys.exit(2)
+
+        network_info, subnets, _ = self.inspect_docker_network(network_name)
+        if network_info is not None:
+            if not subnets:
+                self.log(f"FATAL: docker network {network_name} has no IPv4 subnet config")
+                sys.exit(2)
+
+            start_ip = ipaddress.IPv4Address(self.CONTAINER_IP_START)
+            if not any(start_ip in subnet for subnet in subnets):
+                subnet_desc = ", ".join(str(subnet) for subnet in subnets)
+                self.log(
+                    f"FATAL: fixed IP start {self.CONTAINER_IP_START} is outside docker network "
+                    f"{network_name} IPv4 subnets: {subnet_desc}"
+                )
+                sys.exit(2)
+            return
+
+        subnet = self.build_target_network_subnet()
+        gateway = self.build_target_network_gateway(subnet)
+        self.log(f"creating docker network: {network_name} subnet={subnet} gateway={gateway}")
+        cp = self.run_cmd([
+            "docker", "network", "create",
+            "--driver", "bridge",
+            "--subnet", str(subnet),
+            "--gateway", gateway,
+            network_name,
+        ])
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout).strip() or "unknown error"
+            self.log(f"FATAL: failed to create docker network {network_name}: {detail}")
+            sys.exit(2)
+        self.log(f"created docker network: {network_name} subnet={subnet}")
+
     def is_usable_container_ip(
         self,
         candidate: ipaddress.IPv4Address,
@@ -251,8 +364,9 @@ class BaseTrafficIngestor(ABC):
 
     def get_container_ipv4(self, name: str) -> Optional[str]:
         """获取容器当前 IPv4 地址。"""
-        if self.DOCKER_NETWORK:
-            inspect_expr = f'{{{{with index .NetworkSettings.Networks "{self.DOCKER_NETWORK}"}}}}{{{{.IPAddress}}}}{{{{end}}}}'
+        target_network = self.get_target_docker_network()
+        if target_network != "bridge":
+            inspect_expr = f'{{{{with index .NetworkSettings.Networks "{target_network}"}}}}{{{{.IPAddress}}}}{{{{end}}}}'
         else:
             inspect_expr = "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}"
         cp = self.run_cmd(["docker", "inspect", "-f", inspect_expr, name])
@@ -290,8 +404,9 @@ class BaseTrafficIngestor(ABC):
             "-e", f"HOST_GID={gid}",
             "--privileged",
         ]
-        if self.DOCKER_NETWORK:
-            cmd += ["--network", self.DOCKER_NETWORK]
+        target_network = self.get_target_docker_network()
+        if target_network != "bridge":
+            cmd += ["--network", target_network]
         if container_ip:
             cmd += ["--ip", container_ip]
         if self.CREATE_WITH_TTY:
@@ -391,6 +506,7 @@ class BaseTrafficIngestor(ABC):
             self.log(f"WARN: 建议使用绝对路径挂载，当前={host_code}")
 
         names = self.build_container_names()
+        self.ensure_target_network_ready()
         self.log("checking and creating containers...")
         self.log(f"容器池规模={len(names)}: {names[0]} … {names[-1]}")
         container_specs = self.build_container_specs(names)

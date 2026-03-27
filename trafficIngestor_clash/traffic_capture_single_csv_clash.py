@@ -36,7 +36,8 @@ class TrafficIngestor(BaseTrafficIngestor):
     BASE_DST = '/netdisk/test'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
-    CONTAINER_IP_START = "172.17.150.0"
+    DOCKER_NETWORK = f"{CONTAINER_PREFIX}_net"
+    CONTAINER_IP_START = "172.18.150.10"
     CLASH_HOST_PATH = os.path.join(_project_root, 'clash-for-linux')
     CLASH_CONTAINER_PATH = f"{BaseTrafficIngestor.CONTAINER_CODE_PATH}/clash-for-linux"
     CLASH_PORT = 7890
@@ -52,7 +53,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # 示例：
     # id,url,domain
     # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'text.csv')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'test.csv')
 
     def __init__(self):
         super().__init__()
@@ -205,8 +206,9 @@ class TrafficIngestor(BaseTrafficIngestor):
             "-e", f"HOST_GID={gid}",
             "--privileged",
         ]
-        if self.DOCKER_NETWORK:
-            cmd += ["--network", self.DOCKER_NETWORK]
+        target_network = self.get_target_docker_network()
+        if target_network != "bridge":
+            cmd += ["--network", target_network]
         if container_ip:
             cmd += ["--ip", container_ip]
         if self.CREATE_WITH_TTY:

@@ -22,3 +22,4 @@
 - [x] 已完成并验证：让 `trafficIngestor/traffic_capture_single_csv_clash.py` 基于 `config/config.yaml` 模板替换节点信息生成每容器 `config.yaml`，移除手写 YAML 生成逻辑 - 2026-03-27 16:33
 - [x] 已完成并验证：收紧 `trafficIngestor/traffic_capture_single_csv_clash.py` 的模板替换范围，仅替换 `config/config.yaml` 中单条占位节点定义并保留固定名 `vpnnodename` - 2026-03-27 16:38
 - [x] 已完成并验证：为 `trafficIngestor/base_traffic_ingestor.py` 增加固定容器 IP 自动顺延逻辑，跳过目标 Docker 网络中已占用或不可用的地址 - 2026-03-27 16:49
+- [x] 已完成并验证：为固定 IP 采集器补齐 Docker 自定义网络自动创建逻辑，并将 clash / europe / rsia 入口切换到 `172.18.x.x` 独立网段 - 2026-03-27 17:14

@@ -31,7 +31,8 @@ class TrafficIngestor(BaseTrafficIngestor):
     BASE_DST = '/netdisk/ww/top200000'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
-    CONTAINER_IP_START = "172.17.70.0"
+    DOCKER_NETWORK = f"{CONTAINER_PREFIX}_net"
+    CONTAINER_IP_START = "172.18.70.10"
 
     # CSV 必须包含表头，字段名（大小写不敏感）：
     # - id: 唯一标识，用于任务完成/失败后从 CSV 删除对应行
