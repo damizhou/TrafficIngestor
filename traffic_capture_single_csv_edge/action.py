@@ -11,32 +11,12 @@ if _current_dir not in sys.path:
     sys.path.insert(0, _current_dir)
 
 from tools.base_action import BaseAction
-from tools.edge import create_edge_driver, open_url_and_save_content, kill_edge_processes
-
-EDGE_BACKGROUND_CAPTURE_EXCLUDE_HOSTS = (
-    "edge.microsoft.com",
-    "www.bing.com",
-    "edgeassetservice.azureedge.net",
-    "self.events.data.microsoft.com",
-    "nav-edge.smartscreen.microsoft.com",
-    "c.bing.com",
-    "th.bing.com",
-    "ntp.msn.com",
-    "api.msn.com",
-    "browser.events.data.msn.com",
+from tools.edge import (
+    create_edge_driver,
+    get_edge_background_capture_exclude_hosts,
+    kill_edge_processes,
+    open_url_and_save_content,
 )
-
-
-def _host_matches_domain(host, domain):
-    normalized_host = (host or "").strip(".").lower()
-    normalized_domain = (domain or "").strip(".").lower()
-    if not normalized_host or not normalized_domain:
-        return False
-    return (
-        normalized_host == normalized_domain
-        or normalized_host.endswith(f".{normalized_domain}")
-        or normalized_domain.endswith(f".{normalized_host}")
-    )
 
 
 class XCaptureEdgeAction(BaseAction):
@@ -63,11 +43,7 @@ class XCaptureEdgeAction(BaseAction):
         )
 
     def get_capture_exclude_hosts(self):
-        return tuple(
-            host
-            for host in EDGE_BACKGROUND_CAPTURE_EXCLUDE_HOSTS
-            if not _host_matches_domain(host, self.allowed_domain)
-        )
+        return get_edge_background_capture_exclude_hosts(self.allowed_domain)
 
 
 if __name__ == "__main__":

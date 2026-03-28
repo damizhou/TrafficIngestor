@@ -80,6 +80,32 @@ DESKTOP_FIREFOX_PLATFORM = "Linux x86_64"
 DESKTOP_FIREFOX_OSCPU = "Linux x86_64"
 DESKTOP_FIREFOX_APP_VERSION = "5.0 (X11)"
 _cached_firefox_version = None
+FIREFOX_BACKGROUND_CAPTURE_EXCLUDE_HOSTS = (
+    "firefox.settings.services.mozilla.com",
+    "content-signature-2.cdn.mozilla.net",
+    "firefox-settings-attachments.cdn.mozilla.net",
+)
+
+
+def _host_matches_domain(host, domain):
+    normalized_host = (host or "").strip(".").lower()
+    normalized_domain = (domain or "").strip(".").lower()
+    if not normalized_host or not normalized_domain:
+        return False
+    return (
+        normalized_host == normalized_domain
+        or normalized_host.endswith(f".{normalized_domain}")
+        or normalized_domain.endswith(f".{normalized_host}")
+    )
+
+
+def get_firefox_background_capture_exclude_hosts(allowed_domain=None):
+    """返回 Firefox 默认后台流量排除主机，并避免误排目标站点自身域名。"""
+    return tuple(
+        host
+        for host in FIREFOX_BACKGROUND_CAPTURE_EXCLUDE_HOSTS
+        if not _host_matches_domain(host, allowed_domain)
+    )
 
 
 def _resolve_firefox_version():
@@ -414,3 +440,11 @@ def open_url_and_save_content(driver, url, ssl_key_file_path, logger=None, data_
     time.sleep(10)
 
     return content_path, html_path, screenshot_path, current_url
+
+
+__all__ = [
+    "create_firefox_driver",
+    "get_firefox_background_capture_exclude_hosts",
+    "kill_firefox_processes",
+    "open_url_and_save_content",
+]

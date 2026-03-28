@@ -37,6 +37,39 @@ DESKTOP_EDGE_WOW64 = False
 DESKTOP_EDGE_BRAND_GREASE = "Not_A Brand"
 DESKTOP_EDGE_BRAND_GREASE_VERSION = "8"
 _cached_edge_version = None
+EDGE_BACKGROUND_CAPTURE_EXCLUDE_HOSTS = (
+    "edge.microsoft.com",
+    "www.bing.com",
+    "edgeassetservice.azureedge.net",
+    "self.events.data.microsoft.com",
+    "nav-edge.smartscreen.microsoft.com",
+    "c.bing.com",
+    "th.bing.com",
+    "ntp.msn.com",
+    "api.msn.com",
+    "browser.events.data.msn.com",
+)
+
+
+def _host_matches_domain(host, domain):
+    normalized_host = (host or "").strip(".").lower()
+    normalized_domain = (domain or "").strip(".").lower()
+    if not normalized_host or not normalized_domain:
+        return False
+    return (
+        normalized_host == normalized_domain
+        or normalized_host.endswith(f".{normalized_domain}")
+        or normalized_domain.endswith(f".{normalized_host}")
+    )
+
+
+def get_edge_background_capture_exclude_hosts(allowed_domain=None):
+    """返回 Edge 默认后台流量排除主机，并避免误排目标站点自身域名。"""
+    return tuple(
+        host
+        for host in EDGE_BACKGROUND_CAPTURE_EXCLUDE_HOSTS
+        if not _host_matches_domain(host, allowed_domain)
+    )
 
 
 def _resolve_edge_version():
@@ -300,6 +333,8 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
     os.makedirs(download_folder, exist_ok=True)
 
     os.environ["SE_OFFLINE"] = "true"
+    if blocked_hosts is None:
+        blocked_hosts = get_edge_background_capture_exclude_hosts(task_name)
     normalized_blocked_hosts = _normalize_hosts(blocked_hosts)
     _ACCEPT_LANGUAGE = "zh-CN,zh;q=0.9"
     _LANG_PRIMARY = "zh-CN"
@@ -430,6 +465,7 @@ def kill_edge_processes():
 
 __all__ = [
     "create_edge_driver",
+    "get_edge_background_capture_exclude_hosts",
     "kill_edge_processes",
     "open_url_and_save_content",
     "screenshot_full_page",

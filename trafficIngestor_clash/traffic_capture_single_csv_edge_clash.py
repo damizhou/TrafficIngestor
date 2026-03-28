@@ -31,8 +31,8 @@ class TrafficIngestor(BaseClashTrafficIngestor):
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
     DOCKER_NETWORK_SUBNET_PREFIX = 16
     DOCKER_NETWORK_GATEWAY = "172.18.0.1"
-    CONTAINER_IP_START = "172.18.10.0"
-    CSV_PATH = os.path.join(_project_root, "small_tools", "test.csv")
+    CONTAINER_IP_START = "172.18.20.0"
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_edge.csv")
 
     def __init__(self):
         super().__init__()

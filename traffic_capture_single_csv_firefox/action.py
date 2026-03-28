@@ -13,27 +13,10 @@ if _current_dir not in sys.path:
 from tools.base_action import BaseAction
 from tools.firefox import (
     create_firefox_driver,
+    get_firefox_background_capture_exclude_hosts,
     kill_firefox_processes,
     open_url_and_save_content,
 )
-
-FIREFOX_BACKGROUND_CAPTURE_EXCLUDE_HOSTS = (
-    "firefox.settings.services.mozilla.com",
-    "content-signature-2.cdn.mozilla.net",
-    "firefox-settings-attachments.cdn.mozilla.net",
-)
-
-
-def _host_matches_domain(host, domain):
-    normalized_host = (host or "").strip(".").lower()
-    normalized_domain = (domain or "").strip(".").lower()
-    if not normalized_host or not normalized_domain:
-        return False
-    return (
-        normalized_host == normalized_domain
-        or normalized_host.endswith(f".{normalized_domain}")
-        or normalized_domain.endswith(f".{normalized_host}")
-    )
 
 
 class XCaptureFirefoxAction(BaseAction):
@@ -58,11 +41,7 @@ class XCaptureFirefoxAction(BaseAction):
         )
 
     def get_capture_exclude_hosts(self):
-        return tuple(
-            host
-            for host in FIREFOX_BACKGROUND_CAPTURE_EXCLUDE_HOSTS
-            if not _host_matches_domain(host, self.allowed_domain)
-        )
+        return get_firefox_background_capture_exclude_hosts(self.allowed_domain)
 
 
 if __name__ == "__main__":
