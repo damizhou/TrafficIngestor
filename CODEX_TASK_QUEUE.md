@@ -38,3 +38,6 @@
 - [x] 已完成并验证：对比 temp 下 3 个 clash 容器日志，确认差异发生在浏览器经 Clash 出站后的网络阶段而非代码分支；clash1 也仅首单成功、第二单同样 ERR_CONNECTION_RESET - 2026-03-27 20:05
 - [x] 已完成并验证：为 trafficIngestor_clash/traffic_capture_single_csv_clash.py 增加 DELETE_INVALID_FILES_ON_FAIL 开关，并传入容器内 action.py 控制失败时是否保留 pcap/html/ssl_key - 2026-03-27 20:12
 - [x] 已完成并验证：为 open_url_and_save_content 异常补充浏览器诊断日志，输出 current_url、ready_state、错误页摘要、performance log 中的 Network.loadingFailed 事件 - 2026-03-27 20:20
+- [x] 已完成并验证：抽取 trafficIngestor_clash/traffic_capture_single_csv_clash.py 中的 Clash 运行时逻辑到 trafficIngestor/base_clash_traffic_ingestor.py，入口仅保留配置与任务回调 - 2026-03-28 19:06
+- [x] 已完成并验证：新增 trafficIngestor_clash 下 Edge / Firefox 的 Clash 采集入口与对应 action，并为 tools/edge.py、tools/firefox.py 补充浏览器代理参数支持 - 2026-03-28 19:23
+- [x] 已完成并验证：将 trafficIngestor_clash/base_clash_traffic_ingestor.py 的默认 action 回填源改为 traffic_capture_single_csv_clash/action.py，避免 Clash 基类回退到通用 Chrome action - 2026-03-28 19:29

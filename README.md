@@ -133,3 +133,11 @@ python -m py_compile tools\base_action.py tools\chrome.py tools\edge.py tools\fi
 - 调度脚本会创建和删除同前缀 Docker 容器，运行前确认不会影响其他任务。
 - 输出目录大量使用 `/netdisk/...` 这类绝对路径，迁移环境时必须先改配置。
 - `db/db_config.ini` 当前属于敏感文件，建议本地维护或改为环境变量注入。
+
+## Clash 浏览器变体
+
+- `python trafficIngestor_clash/traffic_capture_single_csv_edge_clash.py`
+  Edge + Clash 采集入口，复用 `traffic_ingestor_fixed_ip_net`，容器 IP 从 `172.18.160.0` 起自动顺延。
+- `python trafficIngestor_clash/traffic_capture_single_csv_firefox_clash.py`
+  Firefox + Clash 采集入口，复用 `traffic_ingestor_fixed_ip_net`，容器 IP 从 `172.18.170.0` 起自动顺延。
+- 容器内对应目录分别为 `traffic_capture_single_csv_edge_clash/` 与 `traffic_capture_single_csv_firefox_clash/`，仅在原 Edge / Firefox action 基础上额外注入 Clash 代理配置，原有非 Clash 入口不受影响。

@@ -6,6 +6,7 @@ import sys
 import subprocess
 import re
 import time
+from urllib.parse import urlparse
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
@@ -145,7 +146,48 @@ def kill_firefox_processes() -> None:
         print(f"Error occurred: {e}")
 
 
-def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None):
+def _parse_manual_proxy(proxy_server):
+    """Parse proxy_server into Firefox manual proxy host/port settings."""
+    if not proxy_server:
+        return None
+
+    parsed = urlparse(proxy_server)
+    scheme = (parsed.scheme or "http").lower()
+    host = parsed.hostname
+    port = parsed.port
+
+    if not host or not port:
+        raise ValueError(f"invalid Firefox proxy server: {proxy_server!r}")
+    if scheme not in {"http", "https", "socks5", "socks4", "socks"}:
+        raise ValueError(f"unsupported Firefox proxy scheme: {scheme}")
+
+    proxy_type = "socks" if scheme.startswith("socks") else "http"
+    socks_version = 4 if scheme == "socks4" else 5
+    return {
+        "type": proxy_type,
+        "host": host,
+        "port": int(port),
+        "socks_version": socks_version,
+    }
+
+
+def _normalize_no_proxy_list(proxy_bypass_list):
+    if not proxy_bypass_list:
+        return None
+
+    values = []
+    seen = set()
+    for part in re.split(r"[;,]", str(proxy_bypass_list)):
+        item = part.strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        values.append(item)
+    return ",".join(values) if values else None
+
+
+def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None,
+                          proxy_server=None, proxy_bypass_list=None):
     """
     创建Firefox浏览器驱动
 
@@ -154,6 +196,8 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
         formatted_time: 格式化的时间字符串
         parsers: 解析器名称/前缀
         data_base_dir: 数据基础目录
+        proxy_server: 可选的浏览器代理地址，如 http://127.0.0.1:7890
+        proxy_bypass_list: 可选的代理绕过列表，如 127.0.0.1;localhost
 
     Returns:
         browser: WebDriver实例
@@ -288,6 +332,27 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
     opts.set_preference("browser.helperApps.neverAsk.saveToDisk",
                         "application/octet-stream,application/pdf,text/plain,text/html,application/json")
     opts.set_preference("pdfjs.disabled", True)
+
+    manual_proxy = _parse_manual_proxy(proxy_server)
+    if manual_proxy:
+        opts.set_preference("signon.autologin.proxy", False)
+        if manual_proxy["type"] == "http":
+            opts.set_preference("network.proxy.type", 1)
+            opts.set_preference("network.proxy.http", manual_proxy["host"])
+            opts.set_preference("network.proxy.http_port", manual_proxy["port"])
+            opts.set_preference("network.proxy.ssl", manual_proxy["host"])
+            opts.set_preference("network.proxy.ssl_port", manual_proxy["port"])
+            opts.set_preference("network.proxy.share_proxy_settings", True)
+        else:
+            opts.set_preference("network.proxy.type", 1)
+            opts.set_preference("network.proxy.socks", manual_proxy["host"])
+            opts.set_preference("network.proxy.socks_port", manual_proxy["port"])
+            opts.set_preference("network.proxy.socks_version", manual_proxy["socks_version"])
+            opts.set_preference("network.proxy.socks_remote_dns", True)
+
+        no_proxy = _normalize_no_proxy_list(proxy_bypass_list)
+        if no_proxy:
+            opts.set_preference("network.proxy.no_proxies_on", no_proxy)
 
     # 创建 WebDriver（geckodriver）
     service = Service(executable_path="/usr/local/bin/geckodriver")

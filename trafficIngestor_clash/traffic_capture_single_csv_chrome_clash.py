@@ -21,10 +21,10 @@ from trafficIngestor.base_traffic_ingestor import get_real_username
 
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    BASE_NAME = "traffic_capture_single_csv_clash"
+    BASE_NAME = "traffic_capture_single_csv_chrome_clash"
     SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_net"
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
-    CONTAINER_COUNT = 15 * 30
+    CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
     BASE_DST = "/netdisk2/ww/trojan/top200000/chrome"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
@@ -34,7 +34,7 @@ class TrafficIngestor(BaseClashTrafficIngestor):
     DOCKER_NETWORK_SUBNET_PREFIX = 16
     DOCKER_NETWORK_GATEWAY = "172.18.0.1"
     CONTAINER_IP_START = "172.18.150.0"
-    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "top300000_ingestor.csv")
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_edge.csv")
 
     def __init__(self):
         super().__init__()

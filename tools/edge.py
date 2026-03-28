@@ -261,7 +261,8 @@ def _resolve_edge_driver():
 
 
 def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
-                       enable_ssl_key_log=True, data_base_dir=None, blocked_hosts=None):
+                       enable_ssl_key_log=True, data_base_dir=None, blocked_hosts=None,
+                       proxy_server=None, proxy_bypass_list=None):
     """
     创建Edge浏览器驱动
 
@@ -272,6 +273,8 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
         enable_ssl_key_log: 是否启用SSL密钥日志（默认True）
         data_base_dir: 数据基础目录，默认为项目根目录下的相对路径
         blocked_hosts: 浏览器启动期就需要阻断的主机列表
+        proxy_server: 可选的浏览器代理地址，如 http://127.0.0.1:7890
+        proxy_bypass_list: 可选的代理绕过列表，如 127.0.0.1;localhost
 
     Returns:
         browser: WebDriver实例
@@ -350,6 +353,10 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
     edge_options.add_argument("--window-size=1920,1080")
     edge_options.add_argument("--log-net-log=/tmp/netlog.json")
     edge_options.add_argument("--net-log-capture-mode=Everything")
+    if proxy_server:
+        edge_options.add_argument(f"--proxy-server={proxy_server}")
+    if proxy_bypass_list:
+        edge_options.add_argument(f"--proxy-bypass-list={proxy_bypass_list}")
     if normalized_blocked_hosts:
         edge_options.add_argument(
             f"--host-resolver-rules={_build_host_resolver_rules(normalized_blocked_hosts)}"

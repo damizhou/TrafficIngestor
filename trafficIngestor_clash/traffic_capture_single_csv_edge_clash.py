@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-traffic_capture_single_csv_clash.py
+traffic_capture_single_csv_edge_clash.py
 
-Read URLs from CSV and capture traffic with a container pool.
-Each container is assigned a dedicated Clash node.
+Read URLs from CSV and capture traffic with Edge containers routed through Clash.
 """
 
 import os
@@ -21,20 +20,19 @@ from trafficIngestor.base_traffic_ingestor import get_real_username
 
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    BASE_NAME = "traffic_capture_single_csv_clash"
+    BASE_NAME = "traffic_capture_single_csv_edge_clash"
     SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_net"
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
-    CONTAINER_COUNT = 15 * 30
+    CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-    BASE_DST = "/netdisk2/ww/trojan/top200000/chrome"
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
+    BASE_DST = "/netdisk2/ww/trojan/wiki/0328/edge"
+    DOCKER_IMAGE = "chuanzhoupan/trace_spider_edge:260309"
     RETRY = 5
-    DELETE_INVALID_FILES_ON_FAIL = False
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
     DOCKER_NETWORK_SUBNET_PREFIX = 16
     DOCKER_NETWORK_GATEWAY = "172.18.0.1"
-    CONTAINER_IP_START = "172.18.150.0"
-    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "top300000_ingestor.csv")
+    CONTAINER_IP_START = "172.18.10.0"
+    CSV_PATH = os.path.join(_project_root, "small_tools", "test.csv")
 
     def __init__(self):
         super().__init__()
@@ -71,6 +69,7 @@ class TrafficIngestor(BaseClashTrafficIngestor):
 
 
 if __name__ == "__main__":
+    TrafficIngestor.main()
     TrafficIngestor.main()
     TrafficIngestor.main()
     TrafficIngestor.main()
