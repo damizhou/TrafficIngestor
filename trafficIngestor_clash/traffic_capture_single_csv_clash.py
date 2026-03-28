@@ -33,6 +33,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     BASE_DST = "/netdisk2/ww/trojan/top200000/chrome"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
+    DELETE_INVALID_FILES_ON_FAIL = False
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
     DOCKER_NETWORK_SUBNET_PREFIX = 16
     DOCKER_NETWORK_GATEWAY = "172.18.0.1"
@@ -187,6 +188,7 @@ class TrafficIngestor(BaseTrafficIngestor):
             "--volume", f"{tools_path}:{self.CONTAINER_CODE_PATH}/tools",
             "-e", f"HOST_UID={uid}",
             "-e", f"HOST_GID={gid}",
+            "-e", f"DELETE_INVALID_FILES_ON_FAIL={1 if self.DELETE_INVALID_FILES_ON_FAIL else 0}",
             "--privileged",
         ]
         target_network = self.get_target_docker_network()
@@ -283,6 +285,24 @@ PY
             self._has_jobs = False
         return jobs
 
+    def on_task_success(self, task: Dict[str, str], paths: Dict[str, str]) -> None:
+        """任务成功后从 CSV 删除记录"""
+        row_id = task.get("row_id", "")
+        if row_id:
+            try:
+                self.remove_from_csv(self.CSV_PATH, row_id)
+            except Exception as e:
+                self.log(f"ERROR: 删除 CSV 记录失败: {e}")
+
+    def on_task_failed(self, task: Dict[str, str], error: str) -> None:
+        """任务失败后也从 CSV 删除记录（避免重复处理）"""
+        # row_id = task.get("row_id", "")
+        # if row_id:
+        #     try:
+        #         self.remove_from_csv(self.CSV_PATH, row_id)
+        #     except Exception as e:
+        #         self.log(f"ERROR: 删除 CSV 记录失败: {e}")
+
     def should_continue(self) -> bool:
         return False
 
@@ -347,4 +367,7 @@ exit 1
 
 
 if __name__ == "__main__":
+    TrafficIngestor.main()
+    TrafficIngestor.main()
+    TrafficIngestor.main()
     TrafficIngestor.main()

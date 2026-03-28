@@ -101,6 +101,7 @@ id,url,domain
 - `DOCKER_NETWORK_SUBNET_PREFIX`：固定 IP 模式的 Docker 子网前缀长度
 - `DOCKER_NETWORK_GATEWAY`：固定 IP 模式的 Docker 网关地址
 - `CONTAINER_IP_START`：可选，按容器序号递增分配固定 IPv4
+- `DELETE_INVALID_FILES_ON_FAIL`：可选，容器内任务失败或校验失败时是否删除失败产物；`traffic_capture_single_csv_clash.py` 可将其设为 `False` 以保留 `pcap/html/ssl_key` 便于排查
 
 当前固定 IP 入口统一复用共享 Docker 网络 `traffic_ingestor_fixed_ip_net`；若目标网络不存在，基类会按 `CONTAINER_IP_START`、`DOCKER_NETWORK_SUBNET_PREFIX` 和 `DOCKER_NETWORK_GATEWAY` 自动创建。仓库中的示例入口目前统一使用 `172.18.0.0/16`，网关固定为 `172.18.0.1`，并分别从 `172.18.50.10`、`172.18.70.10` 和 `172.18.150.0` 起始段分配地址。
 

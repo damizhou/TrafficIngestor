@@ -196,6 +196,98 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
     return browser
 
 
+def _safe_driver_value(getter):
+    try:
+        return getter(), None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {str(e).splitlines()[0]}"
+
+
+def build_browser_error_diagnostics(driver, requested_url, netlog_path="/tmp/netlog.json", max_events=3):
+    """构建导航失败时的浏览器诊断信息。"""
+    details = [f"requested_url={requested_url}"]
+
+    current_url, current_url_err = _safe_driver_value(lambda: driver.current_url)
+    if current_url:
+        details.append(f"current_url={current_url}")
+    elif current_url_err:
+        details.append(f"current_url_error={current_url_err}")
+
+    title, title_err = _safe_driver_value(lambda: driver.title)
+    if title:
+        details.append(f"title={title[:120]!r}")
+    elif title_err:
+        details.append(f"title_error={title_err}")
+
+    ready_state, ready_state_err = _safe_driver_value(
+        lambda: driver.execute_script("return document.readyState")
+    )
+    if ready_state:
+        details.append(f"ready_state={ready_state}")
+    elif ready_state_err:
+        details.append(f"ready_state_error={ready_state_err}")
+
+    body_excerpt, body_excerpt_err = _safe_driver_value(
+        lambda: driver.execute_script(
+            "return document.body ? (document.body.innerText || '').slice(0, 300) : ''"
+        )
+    )
+    if body_excerpt:
+        body_excerpt = " ".join(str(body_excerpt).split())
+        details.append(f"body_excerpt={body_excerpt[:200]!r}")
+    elif body_excerpt_err:
+        details.append(f"body_excerpt_error={body_excerpt_err}")
+
+    perf_entries, perf_err = _safe_driver_value(lambda: driver.get_log("performance"))
+    if perf_entries is not None:
+        request_meta = {}
+        failures = []
+        for entry in perf_entries:
+            try:
+                message = json.loads(entry["message"]).get("message", {})
+            except Exception:
+                continue
+
+            method = message.get("method")
+            params = message.get("params", {})
+            request_id = params.get("requestId")
+
+            if method == "Network.requestWillBeSent" and request_id:
+                request = params.get("request", {})
+                request_meta[request_id] = {
+                    "url": request.get("url", ""),
+                    "method": request.get("method", ""),
+                }
+            elif method == "Network.loadingFailed":
+                meta = request_meta.get(request_id, {})
+                failures.append({
+                    "url": meta.get("url", ""),
+                    "method": meta.get("method", ""),
+                    "type": params.get("type", ""),
+                    "errorText": params.get("errorText", ""),
+                    "canceled": params.get("canceled", False),
+                    "blockedReason": params.get("blockedReason", ""),
+                })
+
+        if failures:
+            details.append(
+                "network_failures="
+                + json.dumps(failures[-max_events:], ensure_ascii=False, separators=(",", ":"))
+            )
+    elif perf_err:
+        details.append(f"performance_log_error={perf_err}")
+
+    if netlog_path:
+        try:
+            if os.path.exists(netlog_path):
+                details.append(f"netlog_path={netlog_path}")
+                details.append(f"netlog_size={os.path.getsize(netlog_path)}")
+        except OSError as e:
+            details.append(f"netlog_stat_error={type(e).__name__}: {e}")
+
+    return " | ".join(details)
+
+
 def open_url_and_save_content(driver, url, ssl_key_file_path, wait_secs=8,
                                save_screenshot=True, data_base_dir=None):
     """

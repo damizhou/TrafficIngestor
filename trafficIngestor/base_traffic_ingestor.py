@@ -546,6 +546,106 @@ class BaseTrafficIngestor(ABC):
             sys.exit(2)
         self.log("docker0: offload disabled (TSO/GSO/GRO off)")
 
+    def get_target_bridge_interface(self) -> Optional[str]:
+        """Return the host bridge interface name for the target Docker network."""
+        network_name = self.get_target_docker_network()
+        if network_name == "bridge":
+            return "docker0"
+
+        network_info, _, _ = self.inspect_docker_network(network_name)
+        if network_info is None:
+            return None
+
+        network_id = str(network_info.get("Id", "")).strip()
+        if len(network_id) < 12:
+            return None
+        return f"br-{network_id[:12]}"
+
+    def disable_host_interface_offload(self, interface_name: str, *, fatal: bool, label: str) -> bool:
+        """Disable TSO/GSO/GRO on a host interface."""
+        shell = f'''
+            set -e
+            if ! command -v ethtool >/dev/null 2>&1; then
+                echo "ethtool not found" >&2
+                exit 1
+            fi
+            if ! ip link show "{interface_name}" >/dev/null 2>&1; then
+                echo "interface not found: {interface_name}" >&2
+                exit 1
+            fi
+            if [ "$(id -u)" -eq 0 ]; then
+                ethtool -K "{interface_name}" tso off gso off gro off
+            else
+                sudo ethtool -K "{interface_name}" tso off gso off gro off
+            fi
+        '''
+        cp = self.run_cmd(["sh", "-lc", shell])
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout).strip() or "unknown error"
+            if fatal:
+                self.log(f"FATAL: failed to disable {label} offload: {detail}")
+                sys.exit(2)
+            self.log(f"WARN: failed to disable {label} offload: {detail}")
+            return False
+        self.log(f"{label}: offload disabled (TSO/GSO/GRO off)")
+        return True
+
+    def disable_target_bridge_offload(self) -> None:
+        """Disable offload on the host bridge backing the current Docker network."""
+        interface_name = self.get_target_bridge_interface()
+        network_name = self.get_target_docker_network()
+        if not interface_name:
+            self.log(f"FATAL: failed to resolve bridge interface for docker network {network_name}")
+            sys.exit(2)
+        self.disable_host_interface_offload(
+            interface_name,
+            fatal=True,
+            label=f"{network_name}/{interface_name}",
+        )
+
+    def find_host_interface_by_ifindex(self, ifindex: int) -> Optional[str]:
+        """Resolve a host interface name from ifindex via /sys/class/net."""
+        if ifindex <= 0:
+            return None
+
+        net_root = Path("/sys/class/net")
+        if not net_root.is_dir():
+            return None
+
+        for entry in net_root.iterdir():
+            try:
+                value = int((entry / "ifindex").read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                continue
+            if value == ifindex:
+                return entry.name
+        return None
+
+    def disable_host_veth_offload_once(self, name: str) -> None:
+        """Disable offload on the host-side veth peer of a container eth0."""
+        cp = self.run_cmd(["docker", "exec", name, "cat", "/sys/class/net/eth0/iflink"])
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout).strip() or "unknown error"
+            self.log(f"WARN: {name}: failed to read eth0 iflink: {detail}")
+            return
+
+        try:
+            ifindex = int(cp.stdout.strip())
+        except ValueError:
+            self.log(f"WARN: {name}: invalid eth0 iflink: {cp.stdout.strip()!r}")
+            return
+
+        interface_name = self.find_host_interface_by_ifindex(ifindex)
+        if not interface_name:
+            self.log(f"WARN: {name}: host veth peer not found for ifindex={ifindex}")
+            return
+
+        self.disable_host_interface_offload(
+            interface_name,
+            fatal=False,
+            label=f"{name}/{interface_name}",
+        )
+
     def remove_containers(self) -> None:
         """删除所有同前缀的容器"""
         subprocess.run(
@@ -598,6 +698,7 @@ class BaseTrafficIngestor(ABC):
 
         names = self.build_container_names()
         self.ensure_target_network_ready()
+        self.disable_target_bridge_offload()
         self.log("checking and creating containers...")
         self.log(f"容器池规模={len(names)}: {names[0]} … {names[-1]}")
         container_specs = self.build_container_specs(names)
@@ -638,9 +739,10 @@ class BaseTrafficIngestor(ABC):
 
         time.sleep(5)
 
-        # Pass 3：对新建容器关闭 offload
-        for n in created:
+        # Pass 3：对容器内 eth0 和宿主机 veth peer 关闭 offload
+        for n in names:
             self.disable_offload_once(n)
+            self.disable_host_veth_offload_once(n)
 
         return names
 

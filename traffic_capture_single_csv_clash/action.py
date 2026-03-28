@@ -19,6 +19,11 @@ class XCaptureAction(BaseAction):
     # 使用默认阈值
     pcap_lowest_size = 100000
     ssl_key_lowest_size = 1000
+    delete_invalid_files_on_fail = os.environ.get("DELETE_INVALID_FILES_ON_FAIL", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+    }
 
     def get_browser_proxy_server(self):
         """仅在 Clash 采集器中为 Chrome 显式配置代理。"""

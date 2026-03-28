@@ -18,7 +18,12 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from tools.capture import capture, stop_capture, kill_tcpdump_processes
-from tools.chrome import create_chrome_driver, open_url_and_save_content, kill_chrome_processes
+from tools.chrome import (
+    build_browser_error_diagnostics,
+    create_chrome_driver,
+    kill_chrome_processes,
+    open_url_and_save_content,
+)
 from tools.logger import setup_logging
 
 
@@ -31,6 +36,7 @@ class BaseAction(ABC):
     pcap_lowest_size = 100000
     ssl_key_lowest_size = 1000
     browser_name = "Chrome"
+    delete_invalid_files_on_fail = True
 
     def __init__(self):
         self.allowed_domain = ""
@@ -245,6 +251,11 @@ class BaseAction(ABC):
             except Exception as e:
                 open_url_error = repr(e).replace("\n", " ")
                 self.logger.error(f"open_url_and_save_content 异常: {e}")
+                try:
+                    diagnostic = build_browser_error_diagnostics(browser, url)
+                except Exception as diag_error:
+                    diagnostic = f"collect_diagnostic_failed={type(diag_error).__name__}: {diag_error}"
+                self.logger.error(f"open_url_and_save_content 诊断: {diagnostic}")
 
             try:
                 browser.quit()
@@ -277,9 +288,12 @@ class BaseAction(ABC):
         else:
             self.logger.warning("数据文件校验失败")
 
-        # 校验不通过时删除文件
+        # 校验不通过时按配置决定是否删除失败文件
         if not validation_passed:
-            self.delete_invalid_files(pcap_path, ssl_key_file_path, content_path, html_path, screenshot_path)
+            if self.delete_invalid_files_on_fail:
+                self.delete_invalid_files(pcap_path, ssl_key_file_path, content_path, html_path, screenshot_path)
+            else:
+                self.logger.info("数据文件校验失败，按配置保留失败文件")
 
         # 构建结果
         if validation_passed:
