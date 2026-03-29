@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import ipaddress
 import os
+import stat
 import sys
 import time
 import json
@@ -932,6 +933,7 @@ class BaseTrafficIngestor(ABC):
             p = Path(csv_path)
             if not p.exists():
                 return
+            original_stat = p.stat()
 
             with p.open("r", encoding="utf-8-sig", newline="") as f:
                 reader = csv.DictReader(f)
@@ -964,6 +966,9 @@ class BaseTrafficIngestor(ABC):
                     writer = csv.DictWriter(f, fieldnames=header_fields, extrasaction="ignore")
                     writer.writeheader()
                     writer.writerows(remaining_rows)
+                os.chmod(tmp_path, stat.S_IMODE(original_stat.st_mode))
+                if hasattr(os, "chown"):
+                    os.chown(tmp_path, original_stat.st_uid, original_stat.st_gid)
                 os.replace(tmp_path, csv_path)
                 self.log(f"已从 CSV 删除记录 row_id={row_id}，剩余 {len(remaining_rows)} 条")
             except Exception:
