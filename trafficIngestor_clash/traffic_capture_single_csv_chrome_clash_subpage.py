@@ -21,20 +21,20 @@ from trafficIngestor.base_traffic_ingestor import get_real_username
 
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    BASE_NAME = "traffic_capture_single_csv_chrome_clash"
-    SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_net"
+    BASE_NAME = "traffic_capture_single_csv_chrome_clash_subpage"
+    SHARED_FIXED_IP_NETWORK = "traffic_ingestor_chrome_clash_subpage_net"
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-    BASE_DST = "/netdisk2/ww/trojan/top200000/chrome"
+    BASE_DST = "/netdisk2/ww/trojan/top2000/subpages_merged"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
     DOCKER_NETWORK_SUBNET_PREFIX = 24
-    DOCKER_NETWORK_GATEWAY = "172.19.10.1"
-    CONTAINER_IP_START = "172.19.10.10"
-    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_edge.csv")
+    DOCKER_NETWORK_GATEWAY = "172.19.40.1"
+    CONTAINER_IP_START = "172.19.40.10"
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "subpages_merged.csv")
 
     def __init__(self):
         super().__init__()

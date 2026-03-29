@@ -22,7 +22,7 @@ from trafficIngestor.base_traffic_ingestor import get_real_username
 
 class TrafficIngestor(BaseClashTrafficIngestor):
     BASE_NAME = "traffic_capture_single_csv_clash"
-    SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_net"
+    SHARED_FIXED_IP_NETWORK = "traffic_ingestor_chrome_clash_net"
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     CONTAINER_COUNT = 15 * 30
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
@@ -31,9 +31,9 @@ class TrafficIngestor(BaseClashTrafficIngestor):
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
-    DOCKER_NETWORK_SUBNET_PREFIX = 16
-    DOCKER_NETWORK_GATEWAY = "172.18.0.1"
-    CONTAINER_IP_START = "172.18.150.0"
+    DOCKER_NETWORK_SUBNET_PREFIX = 23
+    DOCKER_NETWORK_GATEWAY = "172.19.0.1"
+    CONTAINER_IP_START = "172.19.0.10"
     CSV_PATH = os.path.join(_project_root, "small_tools", "result", "top300000_ingestor.csv")
 
     def __init__(self):

@@ -21,7 +21,7 @@ from trafficIngestor.base_traffic_ingestor import get_real_username
 
 class TrafficIngestor(BaseClashTrafficIngestor):
     BASE_NAME = "traffic_capture_single_csv_edge_clash"
-    SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_net"
+    SHARED_FIXED_IP_NETWORK = "traffic_ingestor_edge_clash_net"
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
@@ -29,9 +29,9 @@ class TrafficIngestor(BaseClashTrafficIngestor):
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_edge:260309"
     RETRY = 5
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
-    DOCKER_NETWORK_SUBNET_PREFIX = 16
-    DOCKER_NETWORK_GATEWAY = "172.18.0.1"
-    CONTAINER_IP_START = "172.18.20.0"
+    DOCKER_NETWORK_SUBNET_PREFIX = 24
+    DOCKER_NETWORK_GATEWAY = "172.19.20.1"
+    CONTAINER_IP_START = "172.19.20.10"
     CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_edge.csv")
 
     def __init__(self):

@@ -67,6 +67,7 @@ class BaseTrafficIngestor(ABC):
     CONTAINER_IP_START: Optional[str] = None
     DOCKER_NETWORK_SUBNET_PREFIX: int = 24
     DOCKER_NETWORK_GATEWAY: Optional[str] = None
+    DOCKER_NETWORK_ATTACHMENT_WARN_THRESHOLD: Optional[int] = 900
     DEFAULT_UID: int = int(os.environ.get('SUDO_UID', os.getuid()))
     DEFAULT_GID: int = int(os.environ.get('SUDO_GID', os.getgid()))
     CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH: bool = True
@@ -140,6 +141,21 @@ class BaseTrafficIngestor(ABC):
         """返回固定 IP 所在的目标 Docker 网络名。"""
         return self.DOCKER_NETWORK or "bridge"
 
+    def get_network_ipam_configs(self, network_info: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Normalize docker network IPAM Config to a safe list."""
+        if not isinstance(network_info, dict):
+            return []
+
+        ipam = network_info.get("IPAM") or {}
+        if not isinstance(ipam, dict):
+            return []
+
+        configs = ipam.get("Config") or []
+        if not isinstance(configs, list):
+            return []
+
+        return [item for item in configs if isinstance(item, dict)]
+
     def inspect_target_network(self) -> Tuple[List[ipaddress.IPv4Network], Dict[str, str]]:
         """读取目标 Docker 网络上的 IPv4 子网与已分配地址。"""
         network_name = self.get_target_docker_network()
@@ -157,7 +173,7 @@ class BaseTrafficIngestor(ABC):
             return [], {}
 
         subnets: List[ipaddress.IPv4Network] = []
-        for item in network_info.get("IPAM", {}).get("Config", []):
+        for item in self.get_network_ipam_configs(network_info):
             subnet = str(item.get("Subnet", "")).strip()
             if not subnet:
                 continue
@@ -197,7 +213,7 @@ class BaseTrafficIngestor(ABC):
             return None, [], {}
 
         subnets: List[ipaddress.IPv4Network] = []
-        for item in network_info.get("IPAM", {}).get("Config", []):
+        for item in self.get_network_ipam_configs(network_info):
             subnet = str(item.get("Subnet", "")).strip()
             if not subnet:
                 continue
@@ -219,6 +235,75 @@ class BaseTrafficIngestor(ABC):
             allocated[name] = ipv4
 
         return network_info, subnets, allocated
+
+    def get_docker_network_diagnostic(
+        self,
+        network_name: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Collect a concise diagnostic snapshot for a Docker network."""
+        target_name = network_name or self.get_target_docker_network()
+        network_info, subnets, allocated = self.inspect_docker_network(target_name)
+        if network_info is None:
+            return None
+
+        options = network_info.get("Options", {}) or {}
+        bridge_name = str(options.get("com.docker.network.bridge.name", "")).strip()
+        return {
+            "name": target_name,
+            "subnets": [str(subnet) for subnet in subnets],
+            "attached": len(allocated),
+            "bridge_name": bridge_name,
+        }
+
+    def format_docker_network_diagnostic(
+        self,
+        diagnostic: Optional[Dict[str, Any]],
+        planned_new: int = 0,
+    ) -> str:
+        """Format Docker network diagnostics for logs."""
+        if not diagnostic:
+            return ""
+
+        subnet_desc = ", ".join(diagnostic.get("subnets") or []) or "unknown"
+        parts = [
+            f"network={diagnostic.get('name', 'unknown')}",
+            f"subnets={subnet_desc}",
+            f"attached_containers={diagnostic.get('attached', 'unknown')}",
+        ]
+        bridge_name = str(diagnostic.get("bridge_name", "")).strip()
+        if bridge_name:
+            parts.append(f"bridge={bridge_name}")
+        if planned_new > 0:
+            attached = diagnostic.get("attached", 0)
+            parts.append(f"planned_pool={planned_new}")
+            parts.append(f"projected_attached={attached + planned_new}")
+        return "; ".join(parts)
+
+    def log_target_network_usage(self, planned_new: int = 0) -> None:
+        """Log current Docker network usage and warn on high attachment counts."""
+        if not self.DOCKER_NETWORK:
+            return
+
+        diagnostic = self.get_docker_network_diagnostic()
+        detail = self.format_docker_network_diagnostic(diagnostic, planned_new=planned_new)
+        if detail:
+            self.log(f"docker network status: {detail}")
+
+        if not diagnostic:
+            return
+
+        threshold = self.DOCKER_NETWORK_ATTACHMENT_WARN_THRESHOLD
+        if threshold is None:
+            return
+
+        projected_attached = int(diagnostic.get("attached", 0)) + max(int(planned_new), 0)
+        if projected_attached >= threshold:
+            self.log(
+                "WARN: projected docker network attachment count is high: "
+                f"{projected_attached} >= {threshold}. "
+                "Linux bridge may fail with 'exchange full'; consider splitting collectors "
+                "across separate Docker networks."
+            )
 
     def find_overlapping_docker_networks(
         self,
@@ -321,7 +406,7 @@ class BaseTrafficIngestor(ABC):
 
             expected_gateway = self.build_target_network_gateway(subnets[0])
             existing_gateways = []
-            for item in network_info.get("IPAM", {}).get("Config", []):
+            for item in self.get_network_ipam_configs(network_info):
                 gateway = str(item.get("Gateway", "")).strip()
                 if gateway:
                     existing_gateways.append(gateway)
@@ -486,7 +571,13 @@ class BaseTrafficIngestor(ABC):
         cmd += ["--name", name, image, "/bin/bash"]
         cp = self.run_cmd(cmd)
         if cp.returncode != 0:
-            self.log(f"FATAL: 创建容器失败: {name} -> {cp.stderr.strip()}")
+            detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
+            network_detail = self.format_docker_network_diagnostic(
+                self.get_docker_network_diagnostic()
+            )
+            if network_detail:
+                detail = f"{detail}; {network_detail}"
+            self.log(f"FATAL: 创建容器失败: {name} -> {detail}")
             sys.exit(2)
         if container_ip:
             self.log(f"created container: {name} ip={container_ip}")
@@ -497,7 +588,13 @@ class BaseTrafficIngestor(ABC):
         """启动容器"""
         cp = self.run_cmd(["docker", "start", name])
         if cp.returncode != 0:
-            self.log(f"FATAL: 启动容器失败: {name} -> {cp.stderr.strip()}")
+            detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
+            network_detail = self.format_docker_network_diagnostic(
+                self.get_docker_network_diagnostic()
+            )
+            if network_detail:
+                detail = f"{detail}; {network_detail}"
+            self.log(f"FATAL: 启动容器失败: {name} -> {detail}")
             sys.exit(2)
         self.log(f"started container: {name}")
 
@@ -699,6 +796,7 @@ class BaseTrafficIngestor(ABC):
         names = self.build_container_names()
         self.ensure_target_network_ready()
         self.disable_target_bridge_offload()
+        self.log_target_network_usage(planned_new=len(names))
         self.log("checking and creating containers...")
         self.log(f"容器池规模={len(names)}: {names[0]} … {names[-1]}")
         container_specs = self.build_container_specs(names)

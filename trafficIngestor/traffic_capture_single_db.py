@@ -87,7 +87,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     BASE_NAME = 'traffic_capture_single_db'
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     # 默认并发不宜过高；可通过环境变量覆盖（例如 180）
-    CONTAINER_COUNT = 15 * 10
+    CONTAINER_COUNT = 15 * 5
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
     BASE_DST = '/netdisk2/news_receiver'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"

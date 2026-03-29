@@ -27,7 +27,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-    BASE_DST = '/netdisk/ww/top2000/subpages_merged.csv'
+    BASE_DST = '/netdisk/ww/top2000/subpages_merged'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 

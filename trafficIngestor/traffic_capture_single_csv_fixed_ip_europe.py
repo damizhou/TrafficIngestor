@@ -24,7 +24,7 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     # ============== 配置 ==============
     BASE_NAME = 'traffic_capture_single_csv_fixed_ip_europe'
-    SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_net"
+    SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_europe_net"
     CODE_DIR_NAME = 'traffic_capture_single_csv'
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     CONTAINER_COUNT = 15 * 10
@@ -33,9 +33,9 @@ class TrafficIngestor(BaseTrafficIngestor):
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
-    DOCKER_NETWORK_SUBNET_PREFIX = 16
-    DOCKER_NETWORK_GATEWAY = "172.18.0.1"
-    CONTAINER_IP_START = "172.18.50.10"
+    DOCKER_NETWORK_SUBNET_PREFIX = 24
+    DOCKER_NETWORK_GATEWAY = "172.20.10.1"
+    CONTAINER_IP_START = "172.20.10.10"
 
     # CSV 必须包含表头，字段名（大小写不敏感）：
     # - id: 唯一标识，用于任务完成/失败后从 CSV 删除对应行
