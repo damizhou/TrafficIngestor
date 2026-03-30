@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import ipaddress
 import re
 import shutil
 import sys
@@ -21,7 +22,7 @@ _project_root = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
+from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor, get_real_username
 
 
 class BaseClashTrafficIngestor(BaseTrafficIngestor):
@@ -33,14 +34,143 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
     CLASH_START_TIMEOUT: int = 180
     CLASH_NODE_PLACEHOLDER_NAME: str = "vpnnodename"
     DELETE_INVALID_FILES_ON_FAIL: bool = True
+    AUTO_RUNTIME_NAMESPACE: bool = True
+    RUNTIME_NAME_ENV: str = "TRAFFIC_INGESTOR_RUN_NAME"
+    AUTO_DOCKER_NETWORK_POOL: str = "172.19.0.0/16"
+    AUTO_DOCKER_NETWORK_PREFIX: str = "traffic_ingestor_clash"
+    AUTO_DOCKER_NETWORK_SUBNET_PREFIX: int = 22
+    AUTO_DOCKER_NETWORK_GATEWAY_OFFSET: int = 1
+    AUTO_DOCKER_NETWORK_START_OFFSET: int = 2
 
     def __init__(self):
         super().__init__()
+        self._runtime_namespace = ""
+        self._runtime_entry_script = self.get_entry_script_path()
+        self._runtime_network_prepared = False
+        if self.AUTO_RUNTIME_NAMESPACE:
+            self.configure_runtime_namespace()
         self._vpns = self._load_vpns()
 
     def get_default_action_source(self) -> Path:
         """Fallback to the Clash action when HOST_CODE_PATH/action.py is missing."""
         return Path(_project_root) / "traffic_capture_single_csv_clash" / "action.py"
+
+    def build_runtime_namespace(self) -> str:
+        """Derive a safe runtime namespace from env or the entry script name."""
+        requested = os.environ.get(self.RUNTIME_NAME_ENV, "").strip()
+        if requested:
+            raw_name = requested
+        elif self._runtime_entry_script is not None:
+            raw_name = self._runtime_entry_script.stem
+        else:
+            raw_name = getattr(type(self), "BASE_NAME", "") or type(self).__name__
+        normalized = self.normalize_runtime_name(raw_name, fallback="traffic_capture_single_csv_clash")
+        return self.shorten_runtime_name(normalized, max_length=48)
+
+    def build_auto_network_prefix(self, pool: ipaddress.IPv4Network) -> int:
+        """Pick a fixed subnet prefix for auto-created Clash networks."""
+        prefix = int(self.AUTO_DOCKER_NETWORK_SUBNET_PREFIX)
+        start_offset = max(int(self.AUTO_DOCKER_NETWORK_START_OFFSET), 2)
+        gateway_offset = max(int(self.AUTO_DOCKER_NETWORK_GATEWAY_OFFSET), 1)
+        required_usable = max(int(self.CONTAINER_COUNT), 1) + start_offset + 4
+        required_total = required_usable + 2
+        if prefix < pool.prefixlen or prefix > 30:
+            raise RuntimeError(f"invalid auto docker subnet prefix /{prefix} for pool {pool}")
+
+        subnet_size = 1 << (32 - prefix)
+        if required_total > subnet_size:
+            raise RuntimeError(
+                f"auto docker subnet /{prefix} is too small for {self.CONTAINER_COUNT} containers"
+            )
+        if gateway_offset >= subnet_size - 1:
+            raise RuntimeError(f"gateway offset {gateway_offset} is outside auto subnet /{prefix}")
+        if start_offset >= subnet_size - 1:
+            raise RuntimeError(f"start offset {start_offset} is outside auto subnet /{prefix}")
+        if start_offset == gateway_offset:
+            raise RuntimeError("auto docker gateway offset and start offset cannot be the same")
+        return prefix
+
+    def select_auto_network_subnet(self, runtime_name: str) -> ipaddress.IPv4Network:
+        """Pick the first free subnet inside the managed Clash network pool."""
+        pool = ipaddress.ip_network(self.AUTO_DOCKER_NETWORK_POOL, strict=False)
+        prefix = self.build_auto_network_prefix(pool)
+        if prefix < pool.prefixlen:
+            raise RuntimeError(f"invalid auto network prefix {prefix} for pool {pool}")
+
+        candidates = list(pool.subnets(new_prefix=prefix))
+        if not candidates:
+            raise RuntimeError(f"no candidate subnets available in pool {pool} with prefix /{prefix}")
+
+        existing_networks = self.list_docker_network_ipv4_subnets(ignore_network=self.DOCKER_NETWORK)
+
+        def overlaps(candidate: ipaddress.IPv4Network) -> bool:
+            for _, subnets in existing_networks:
+                for subnet in subnets:
+                    if candidate.overlaps(subnet):
+                        return True
+            return False
+
+        for candidate in candidates:
+            if not overlaps(candidate):
+                return candidate
+
+        overlap_desc = ", ".join(
+            f"{name}({';'.join(str(subnet) for subnet in subnets)})"
+            for name, subnets in existing_networks
+            if subnets
+        )
+        raise RuntimeError(
+            f"no free subnet left in auto Clash pool {pool} for {runtime_name}; existing={overlap_desc}"
+        )
+
+    def configure_runtime_namespace(self) -> None:
+        """Isolate Clash collectors by script-level runtime namespace."""
+        runtime_name = self.build_runtime_namespace()
+        network_token = self.shorten_runtime_name(runtime_name, max_length=32)
+
+        self._runtime_namespace = runtime_name
+        self.BASE_NAME = runtime_name
+        self.HOST_CODE_PATH = os.path.join(_project_root, runtime_name)
+        self.CONTAINER_PREFIX = f"{get_real_username()}_{runtime_name}"
+        self.DOCKER_NETWORK = f"{self.AUTO_DOCKER_NETWORK_PREFIX}_{network_token}_net"
+        self.DOCKER_NETWORK_GATEWAY = None
+        self.CONTAINER_IP_START = None
+        self._runtime_network_prepared = False
+
+    def configure_runtime_network(self) -> None:
+        """Resolve the runtime namespace to a concrete Docker subnet."""
+        if not self.AUTO_RUNTIME_NAMESPACE:
+            return
+        if self._runtime_network_prepared:
+            return
+
+        network_name = self.DOCKER_NETWORK
+        network_info, subnets, _ = self.inspect_docker_network(network_name)
+        gateway_offset = max(int(self.AUTO_DOCKER_NETWORK_GATEWAY_OFFSET), 1)
+        start_offset = max(int(self.AUTO_DOCKER_NETWORK_START_OFFSET), 2)
+        if network_info is not None:
+            if not subnets:
+                raise RuntimeError(f"docker network {network_name} exists but has no IPv4 subnet")
+            subnet = subnets[0]
+            gateway = ""
+            for item in self.get_network_ipam_configs(network_info):
+                gateway = str(item.get("Gateway", "")).strip()
+                if gateway:
+                    break
+            if not gateway:
+                gateway = str(ipaddress.IPv4Address(int(subnet.network_address) + gateway_offset))
+        else:
+            subnet = self.select_auto_network_subnet(self._runtime_namespace or self.build_runtime_namespace())
+            gateway = str(ipaddress.IPv4Address(int(subnet.network_address) + gateway_offset))
+
+        start_ip = ipaddress.IPv4Address(int(subnet.network_address) + start_offset)
+        if start_ip not in subnet or start_ip == subnet.broadcast_address:
+            raise RuntimeError(f"invalid auto start IP {start_ip} for subnet {subnet}")
+
+        self.DOCKER_NETWORK_SUBNET_PREFIX = subnet.prefixlen
+        self.DOCKER_NETWORK_GATEWAY = gateway
+        self.CONTAINER_IP_START = str(start_ip)
+        self._runtime_network_prepared = True
 
     def get_vpn_items(self) -> List[Dict[str, Any]]:
         from config.sever_info import vpns_info
@@ -157,6 +287,18 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
             self.log(f"FATAL: clash-for-linux 目录不存在: {self.CLASH_HOST_PATH}")
             sys.exit(2)
 
+        self.ensure_docker_available()
+        if self.AUTO_RUNTIME_NAMESPACE:
+            self.configure_runtime_network()
+        entry_script = str(self._runtime_entry_script) if self._runtime_entry_script else "unknown"
+        self.log(
+            "runtime isolation:",
+            f"entry={entry_script}",
+            f"base_name={self.BASE_NAME}",
+            f"host_code={self.HOST_CODE_PATH}",
+            f"network={self.DOCKER_NETWORK}",
+            f"start_ip={self.CONTAINER_IP_START}",
+        )
         self.ensure_host_code_path_ready()
         names = self.build_container_names()
         for name in names:

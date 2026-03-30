@@ -16,17 +16,15 @@ _project_root = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor, get_real_username
+from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
 
 
 class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
 
     # ============== 配置 ==============
-    BASE_NAME = 'traffic_capture_single_csv'
-    CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     CONTAINER_COUNT = 15 * 10
-    HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
+    HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv')
     BASE_DST = '/netdisk2/ww/wiki/0325/chrome'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5

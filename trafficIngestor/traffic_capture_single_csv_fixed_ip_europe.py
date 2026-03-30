@@ -16,17 +16,15 @@ _project_root = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor, get_real_username
+from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
 
 
 class TrafficIngestor(BaseTrafficIngestor):
     """支持固定容器 IP 的流量采集器"""
 
     # ============== 配置 ==============
-    BASE_NAME = 'traffic_capture_single_csv_fixed_ip_europe'
     SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_europe_net"
     CODE_DIR_NAME = 'traffic_capture_single_csv'
-    CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, CODE_DIR_NAME)
     BASE_DST = '/netdisk/ww/top200000'

@@ -21,7 +21,7 @@ _project_root = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor, get_real_username
+from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
 
 
 class _DailyErrorLogWriter:
@@ -84,11 +84,9 @@ class TrafficIngestor(BaseTrafficIngestor):
     """新闻流量采集器"""
 
     # ============== 配置 ==============
-    BASE_NAME = 'traffic_capture_single_db'
-    CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     # 默认并发不宜过高；可通过环境变量覆盖（例如 180）
     CONTAINER_COUNT = 15 * 10
-    HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
+    HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_db')
     BASE_DST = '/netdisk2/news_receiver'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5

@@ -9,8 +9,10 @@ base_traffic_ingestor.py
 
 from __future__ import annotations
 import csv
+import hashlib
 import ipaddress
 import os
+import re
 import stat
 import sys
 import time
@@ -52,6 +54,7 @@ class BaseTrafficIngestor(ABC):
     """
 
     # ============== 子类必须设置的配置 ==============
+    BASE_NAME: str = ""
     CONTAINER_PREFIX: str = ""
     HOST_CODE_PATH: str = ""
     BASE_DST: str = ""
@@ -74,6 +77,8 @@ class BaseTrafficIngestor(ABC):
     CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH: bool = True
 
     def __init__(self):
+        self._runtime_entry_script = self.get_entry_script_path()
+        self.configure_runtime_identity()
         self._stats_lock = threading.Lock()
         self._csv_lock = threading.Lock()
         self._pbar = None
@@ -105,6 +110,53 @@ class BaseTrafficIngestor(ABC):
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, timeout=timeout
         )
+
+    def get_entry_script_path(self) -> Optional[Path]:
+        """Return the current collector entry script path when available."""
+        module = sys.modules.get(type(self).__module__)
+        raw_path = getattr(module, "__file__", None) if module is not None else None
+        if not raw_path:
+            return None
+        try:
+            return Path(raw_path).resolve()
+        except OSError:
+            return Path(raw_path)
+
+    @staticmethod
+    def normalize_runtime_name(name: str, fallback: str = "collector") -> str:
+        """Normalize arbitrary names into safe filesystem / Docker identifiers."""
+        cleaned = re.sub(r"[^0-9A-Za-z_.-]+", "_", str(name or "").strip())
+        cleaned = cleaned.strip("._-")
+        return cleaned or fallback
+
+    @staticmethod
+    def shorten_runtime_name(name: str, max_length: int = 48) -> str:
+        """Keep identifiers readable while staying within Docker naming limits."""
+        if max_length <= 8 or len(name) <= max_length:
+            return name
+        digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+        head = max_length - len(digest) - 1
+        return f"{name[:head]}-{digest}"
+
+    def build_runtime_name(self) -> str:
+        """Derive a runtime name for container and workspace identity."""
+        raw_name = str(getattr(type(self), "BASE_NAME", "") or "").strip()
+        if not raw_name and self._runtime_entry_script is not None:
+            raw_name = self._runtime_entry_script.stem
+        if not raw_name and self.HOST_CODE_PATH:
+            raw_name = Path(self.HOST_CODE_PATH).name
+        if not raw_name:
+            raw_name = type(self).__name__
+        normalized = self.normalize_runtime_name(raw_name, fallback="traffic_ingestor")
+        return self.shorten_runtime_name(normalized, max_length=48)
+
+    def configure_runtime_identity(self) -> None:
+        """Populate BASE_NAME / CONTAINER_PREFIX / HOST_CODE_PATH when subclasses omit them."""
+        runtime_name = self.build_runtime_name()
+        self.BASE_NAME = runtime_name
+        self.CONTAINER_PREFIX = f"{get_real_username()}_{runtime_name}"
+        if not self.HOST_CODE_PATH:
+            self.HOST_CODE_PATH = os.path.join(_project_root, runtime_name)
 
     # ============== Docker 容器管理 ==============
     def ensure_docker_available(self) -> None:
@@ -312,20 +364,30 @@ class BaseTrafficIngestor(ABC):
         ignore_network: Optional[str] = None,
     ) -> List[Tuple[str, List[ipaddress.IPv4Network]]]:
         """List existing docker networks whose IPv4 subnets overlap target_subnet."""
+        overlaps: List[Tuple[str, List[ipaddress.IPv4Network]]] = []
+        for network_name, subnets in self.list_docker_network_ipv4_subnets(ignore_network=ignore_network):
+            matched = [subnet for subnet in subnets if subnet.overlaps(target_subnet)]
+            if matched:
+                overlaps.append((network_name, matched))
+        return overlaps
+
+    def list_docker_network_ipv4_subnets(
+        self,
+        ignore_network: Optional[str] = None,
+    ) -> List[Tuple[str, List[ipaddress.IPv4Network]]]:
+        """List all Docker networks with their IPv4 subnets."""
         cp = self.run_cmd(["docker", "network", "ls", "--format", "{{.Name}}"])
         if cp.returncode != 0:
             return []
 
-        overlaps: List[Tuple[str, List[ipaddress.IPv4Network]]] = []
+        networks: List[Tuple[str, List[ipaddress.IPv4Network]]] = []
         for raw_name in cp.stdout.splitlines():
             network_name = raw_name.strip()
             if not network_name or network_name == ignore_network:
                 continue
             _, subnets, _ = self.inspect_docker_network(network_name)
-            matched = [subnet for subnet in subnets if subnet.overlaps(target_subnet)]
-            if matched:
-                overlaps.append((network_name, matched))
-        return overlaps
+            networks.append((network_name, subnets))
+        return networks
 
     def build_target_network_subnet(self) -> ipaddress.IPv4Network:
         """Build the user-defined bridge subnet from CONTAINER_IP_START."""
@@ -745,11 +807,15 @@ class BaseTrafficIngestor(ABC):
         )
 
     def remove_containers(self) -> None:
-        """删除所有同前缀的容器"""
-        subprocess.run(
-            f'docker ps -aq -f "name=^{self.CONTAINER_PREFIX}" | xargs -r docker rm -f',
-            shell=True, check=False
-        )
+        """删除当前容器池的精确容器名，避免误删同前缀的其它任务。"""
+        removed = 0
+        for name in self.build_container_names():
+            if self.container_exists(name) is None:
+                continue
+            self.remove_container(name)
+            removed += 1
+        if removed:
+            self.log(f"removed {removed} containers for current runtime namespace")
 
     def build_container_names(self) -> List[str]:
         """构建容器名列表"""

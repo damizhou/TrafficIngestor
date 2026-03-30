@@ -47,3 +47,7 @@
 - [x] 已完成并验证：拆分固定 IP 采集入口到独立 Docker 网络，并为容器创建/启动失败补充网络挂载数诊断，避免共享 bridge 触发 `exchange full` - 2026-03-29 09:41
 
 - [x] Completed and verified: preserve CSV uid/gid/mode during remove_from_csv atomic replace so root runs do not replace the file with temp-file ownership - 2026-03-29 19:20
+- [x] 已完成并验证：为 `trafficIngestor_clash` 基类增加按入口脚本名自动隔离的运行命名空间与 Docker 子网分配，并将容器清理收紧为精确容器名，避免复制脚本后网络冲突或误删并行任务 - 2026-03-30 15:10
+- [x] 已完成并验证：将 `trafficIngestor_clash` 自动建网策略固定为 `/22` 子网，并统一使用每个子网的 `.1` 网关与 `.2` 起始容器 IP - 2026-03-30 15:22
+- [x] 已完成并验证：移除 `trafficIngestor_clash` 各入口脚本中的显式网络/IP配置，并将基类自动子网分配改为在 `172.19.0.0/16` 地址池内顺序扫描 `/22` 子网 - 2026-03-30 15:35
+- [x] 已完成并验证：为 `trafficIngestor/base_traffic_ingestor.py` 增加默认运行命名推导，并移除 `trafficIngestor` 各入口脚本中的显式 `BASE_NAME` / `CONTAINER_PREFIX` 配置 - 2026-03-30 15:48

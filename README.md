@@ -92,6 +92,8 @@ id,url,domain
 ### CSV 采集任务
 每个 `trafficIngestor/traffic_capture_single_*.py` 都是一个具体采集器。常改配置包括：
 
+`trafficIngestor/` 下基于 `BaseTrafficIngestor` 的入口默认按脚本文件名自动推导 `BASE_NAME` 和 `CONTAINER_PREFIX`；多数入口也不再需要显式维护这两个字段，只保留 `HOST_CODE_PATH`、CSV、镜像、并发等实际业务配置。
+
 - `CSV_PATH`：输入任务 CSV
 - `BASE_DST`：最终输出目录
 - `CONTAINER_COUNT`：容器并发数
@@ -103,7 +105,9 @@ id,url,domain
 - `CONTAINER_IP_START`：可选，按容器序号递增分配固定 IPv4
 - `DELETE_INVALID_FILES_ON_FAIL`：可选，容器内任务失败或校验失败时是否删除失败产物；`traffic_capture_single_csv_clash.py` 可将其设为 `False` 以保留 `pcap/html/ssl_key` 便于排查
 
-固定 IP 入口默认使用各自独立的 Docker 网络；若目标网络不存在，基类会按 `CONTAINER_IP_START`、`DOCKER_NETWORK_SUBNET_PREFIX` 和 `DOCKER_NETWORK_GATEWAY` 自动创建。当前示例入口分别使用 `traffic_ingestor_fixed_ip_europe_net`(`172.19.10.0/24`)、`traffic_ingestor_fixed_ip_rsia_net`(`172.19.20.0/24`)、`traffic_ingestor_edge_clash_net`(`172.19.30.0/24`)、`traffic_ingestor_firefox_clash_net`(`172.19.40.0/24`)、`traffic_ingestor_chrome_clash_subpage_net`(`172.19.50.0/24`) 和 `traffic_ingestor_chrome_clash_net`(`172.19.60.0/23`)；这样可以避免与历史共享网段 `172.18.0.0/16` 重叠，并减少多个大容器池复用同一 bridge 时触发 `exchange full`。
+固定 IP 入口默认使用各自独立的 Docker 网络；若目标网络不存在，基类会按 `CONTAINER_IP_START`、`DOCKER_NETWORK_SUBNET_PREFIX` 和 `DOCKER_NETWORK_GATEWAY` 自动创建。当前示例入口分别使用 `traffic_ingestor_fixed_ip_europe_net`(`172.19.10.0/24`)、`traffic_ingestor_fixed_ip_rsia_net`(`172.19.20.0/24`) 等网络；这样可以避免与历史共享网段 `172.18.0.0/16` 重叠，并减少多个大容器池复用同一 bridge 时触发 `exchange full`。
+
+`trafficIngestor_clash/` 下的入口额外启用了“运行命名空间”隔离：默认按入口脚本文件名自动推导 `BASE_NAME`、`HOST_CODE_PATH`、`CONTAINER_PREFIX` 和 `DOCKER_NETWORK`。基类不会创建 `172.19.0.0/16` 这个大网段，而是把它当作地址池，按顺序扫描可用的 `/22` 子网并依次使用 `172.19.0.0/22`、`172.19.4.0/22`、`172.19.8.0/22`……；新建的自动子网默认使用 `.1` 作为网关、`.2` 作为首个容器 IP。这样各个 clash 入口脚本本身不再显式配置网络和 IP，只保留任务规模、镜像、CSV 路径等业务参数。若需要显式指定命名空间，可设置环境变量 `TRAFFIC_INGESTOR_RUN_NAME`。
 
 ### 数据库采集任务
 数据库模式使用 `db/db_config.ini`。需要提供 `mysql` 配置节，并包含：
@@ -130,14 +134,16 @@ python -m py_compile tools\base_action.py tools\chrome.py tools\edge.py tools\fi
 
 - 浏览器路径和驱动路径主要写死在 `tools/chrome.py`、`tools/edge.py`、`tools/firefox.py`，更换镜像时要同步检查。
 - 抓包逻辑依赖 `tcpdump` 和 `sudo pkill -f tcpdump`，受限环境中可能失败。
-- 调度脚本会创建和删除同前缀 Docker 容器，运行前确认不会影响其他任务。
+- 调度脚本会创建和删除当前入口对应的容器池；`trafficIngestor_clash/` 默认按脚本名隔离运行命名空间，避免复制脚本后误删其他任务。
 - 输出目录大量使用 `/netdisk/...` 这类绝对路径，迁移环境时必须先改配置。
 - `db/db_config.ini` 当前属于敏感文件，建议本地维护或改为环境变量注入。
 
 ## Clash 浏览器变体
 
 - `python trafficIngestor_clash/traffic_capture_single_csv_edge_clash.py`
-  Edge + Clash 采集入口，使用 `traffic_ingestor_edge_clash_net`，容器 IP 从 `172.19.30.10` 起自动顺延。
+  Edge + Clash 采集入口；默认按入口脚本名自动生成独立的运行目录、容器名前缀和 Docker 网络。
 - `python trafficIngestor_clash/traffic_capture_single_csv_firefox_clash.py`
-  Firefox + Clash 采集入口，使用 `traffic_ingestor_firefox_clash_net`，容器 IP 从 `172.19.40.10` 起自动顺延。
+  Firefox + Clash 采集入口；默认按入口脚本名自动生成独立的运行目录、容器名前缀和 Docker 网络。
+- `TRAFFIC_INGESTOR_RUN_NAME=my_firefox_batch python trafficIngestor_clash/traffic_capture_single_csv_firefox_clash.py`
+  可选，用显式运行名覆盖默认脚本名隔离规则；适合同一入口脚本并行跑多批任务。
 - 容器内对应目录分别为 `traffic_capture_single_csv_edge_clash/` 与 `traffic_capture_single_csv_firefox_clash/`，仅在原 Edge / Firefox action 基础上额外注入 Clash 代理配置，原有非 Clash 入口不受影响。
