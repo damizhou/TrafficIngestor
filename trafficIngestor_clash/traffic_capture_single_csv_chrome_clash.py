@@ -22,11 +22,11 @@ from trafficIngestor.base_traffic_ingestor import get_real_username
 
 class TrafficIngestor(BaseClashTrafficIngestor):
     BASE_NAME = "traffic_capture_single_csv_chrome_clash"
-    SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_net"
+    SHARED_FIXED_IP_NETWORK = "traffic_ingestor_chrome_clash_net_temp"
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-    BASE_DST = "/netdisk2/ww/trojan/top200000/chrome"
+    BASE_DST = "/netdisk2/ww/trojan/top2000/homepage_only/260330/chrome"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False
@@ -34,7 +34,7 @@ class TrafficIngestor(BaseClashTrafficIngestor):
     DOCKER_NETWORK_SUBNET_PREFIX = 24
     DOCKER_NETWORK_GATEWAY = "172.19.10.1"
     CONTAINER_IP_START = "172.19.10.10"
-    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_edge.csv")
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "homeonly_merged_chrome.csv")
 
     def __init__(self):
         super().__init__()

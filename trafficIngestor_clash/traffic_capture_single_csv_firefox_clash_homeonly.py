@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-traffic_capture_single_csv_clash.py
+traffic_capture_single_csv_firefox_clash.py
 
-Read URLs from CSV and capture traffic with a container pool.
-Each container is assigned a dedicated Clash node.
+Read URLs from CSV and capture traffic with Firefox containers routed through Clash.
 """
 
 import os
@@ -21,20 +20,19 @@ from trafficIngestor.base_traffic_ingestor import get_real_username
 
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    BASE_NAME = "traffic_capture_single_csv_chrome_subpage_clash"
-    SHARED_FIXED_IP_NETWORK = "traffic_ingestor_chrome_clash_subpage_net"
+    BASE_NAME = "traffic_capture_single_csv_firefox_clash"
+    SHARED_FIXED_IP_NETWORK = "traffic_ingestor_firefox_clash_net"
     CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-    BASE_DST = "/netdisk2/ww/trojan/top2000/subpages_merged"
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
+    BASE_DST = "/netdisk2/ww/trojan/wiki/0328/firefox"
+    DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"
     RETRY = 5
-    DELETE_INVALID_FILES_ON_FAIL = False
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
     DOCKER_NETWORK_SUBNET_PREFIX = 24
-    DOCKER_NETWORK_GATEWAY = "172.19.40.1"
-    CONTAINER_IP_START = "172.19.40.10"
-    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "subpages_merged.csv")
+    DOCKER_NETWORK_GATEWAY = "172.19.30.1"
+    CONTAINER_IP_START = "172.19.30.10"
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_firefox.csv")
 
     def __init__(self):
         super().__init__()
@@ -71,6 +69,7 @@ class TrafficIngestor(BaseClashTrafficIngestor):
 
 
 if __name__ == "__main__":
+    TrafficIngestor.main()
     TrafficIngestor.main()
     TrafficIngestor.main()
     TrafficIngestor.main()
