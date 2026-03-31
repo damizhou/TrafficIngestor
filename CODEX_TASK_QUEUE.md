@@ -51,3 +51,4 @@
 - [x] 已完成并验证：将 `trafficIngestor_clash` 自动建网策略固定为 `/22` 子网，并统一使用每个子网的 `.1` 网关与 `.2` 起始容器 IP - 2026-03-30 15:22
 - [x] 已完成并验证：移除 `trafficIngestor_clash` 各入口脚本中的显式网络/IP配置，并将基类自动子网分配改为在 `172.19.0.0/16` 地址池内顺序扫描 `/22` 子网 - 2026-03-30 15:35
 - [x] 已完成并验证：为 `trafficIngestor/base_traffic_ingestor.py` 增加默认运行命名推导，并移除 `trafficIngestor` 各入口脚本中的显式 `BASE_NAME` / `CONTAINER_PREFIX` 配置 - 2026-03-30 15:48
+- [x] 已完成并验证：移除 `github_traffic.py`、`traffic_capture_single_csv_top200000.py`、`traffic_capture_single_csv_fixed_ip_europe.py` 中遗漏的显式 `HOST_CODE_PATH` 配置，并统一改为由基类自动推导 - 2026-03-30 16:02

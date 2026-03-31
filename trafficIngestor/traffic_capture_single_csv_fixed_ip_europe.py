@@ -24,9 +24,7 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     # ============== 配置 ==============
     SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_europe_net"
-    CODE_DIR_NAME = 'traffic_capture_single_csv'
     CONTAINER_COUNT = 15 * 10
-    HOST_CODE_PATH = os.path.join(_project_root, CODE_DIR_NAME)
     BASE_DST = '/netdisk/ww/top200000'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5

@@ -92,7 +92,7 @@ id,url,domain
 ### CSV 采集任务
 每个 `trafficIngestor/traffic_capture_single_*.py` 都是一个具体采集器。常改配置包括：
 
-`trafficIngestor/` 下基于 `BaseTrafficIngestor` 的入口默认按脚本文件名自动推导 `BASE_NAME` 和 `CONTAINER_PREFIX`；多数入口也不再需要显式维护这两个字段，只保留 `HOST_CODE_PATH`、CSV、镜像、并发等实际业务配置。
+`trafficIngestor/` 下基于 `BaseTrafficIngestor` 的入口默认按脚本文件名自动推导 `BASE_NAME`、`CONTAINER_PREFIX` 和 `HOST_CODE_PATH`；多数入口只保留 CSV、镜像、并发、输出目录等实际业务配置。只有确实需要复用其他代码目录时，才需要显式覆盖 `HOST_CODE_PATH`。
 
 - `CSV_PATH`：输入任务 CSV
 - `BASE_DST`：最终输出目录
