@@ -25,7 +25,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # ============== 配置 ==============
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_mastodon')
-    BASE_DST = '/netdisk/lyl/0326/chrome/without_login'
+    BASE_DST = '/netdisk/lyl/0401/chrome/without_login'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 
