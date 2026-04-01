@@ -147,3 +147,8 @@ python -m py_compile tools\base_action.py tools\chrome.py tools\edge.py tools\fi
 - `TRAFFIC_INGESTOR_RUN_NAME=my_firefox_batch python trafficIngestor_clash/traffic_capture_single_csv_firefox_clash.py`
   可选，用显式运行名覆盖默认脚本名隔离规则；适合同一入口脚本并行跑多批任务。
 - 容器内对应目录分别为 `traffic_capture_single_csv_edge_clash/` 与 `traffic_capture_single_csv_firefox_clash/`，仅在原 Edge / Firefox action 基础上额外注入 Clash 代理配置，原有非 Clash 入口不受影响。
+## DNS
+
+- Collectors no longer pass `--dns 172.17.0.1` by default.
+- Set `DOCKER_DNS` only when a collector must force a specific container DNS server.
+- Otherwise, rely on Docker daemon DNS settings so custom bridge networks do not inherit a stale `172.17.0.1` assumption.

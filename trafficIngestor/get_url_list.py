@@ -63,6 +63,7 @@ HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
 DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
 # 任务失败后的最大重试次数
 RETRY = 3
+DOCKER_DNS: Optional[str] = None
 
 # 源数据 CSV 文件路径，包含待爬取的网站列表
 SOURCE_CSV = os.path.join(_project_root, "small_tools", "top4000.csv")
@@ -168,6 +169,12 @@ def _safe_uid_gid() -> Tuple[str, str]:
         return "1000", "1000"
 
 
+def _docker_dns_args() -> List[str]:
+    """Return optional explicit Docker DNS args when overriding daemon defaults."""
+    dns_server = (DOCKER_DNS or "").strip()
+    return ["--dns", dns_server] if dns_server else []
+
+
 def create_container(name: str, host_code_path: str, image: str) -> None:
     """创建新的 Docker 容器，挂载代码目录和 tools 目录。"""
     uid, gid = _safe_uid_gid()
@@ -183,6 +190,11 @@ def create_container(name: str, host_code_path: str, image: str) -> None:
         "-itd",
         "--name", name, image, "/bin/bash",
     ]
+    dns_args = _docker_dns_args()
+    if dns_args:
+        cmd[3:5] = dns_args
+    else:
+        del cmd[3:5]
     cp = run(cmd)
     if cp.returncode != 0:
         log(f"FATAL: 创建容器失败: {name} -> {cp.stderr.strip()}", container=name)

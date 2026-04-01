@@ -69,6 +69,7 @@ class BaseTrafficIngestor(ABC):
     FIRST_EXEC_INTERVAL: float = 1.0
     DOCKER_NETWORK: Optional[str] = None
     CONTAINER_IP_START: Optional[str] = None
+    DOCKER_DNS: Optional[str] = None
     DOCKER_NETWORK_SUBNET_PREFIX: int = 24
     DOCKER_NETWORK_GATEWAY: Optional[str] = None
     DOCKER_NETWORK_ATTACHMENT_WARN_THRESHOLD: Optional[int] = 900
@@ -193,6 +194,11 @@ class BaseTrafficIngestor(ABC):
     def get_target_docker_network(self) -> str:
         """返回固定 IP 所在的目标 Docker 网络名。"""
         return self.DOCKER_NETWORK or "bridge"
+
+    def get_docker_dns_args(self) -> List[str]:
+        """Return optional explicit Docker DNS args when overriding daemon defaults."""
+        dns_server = (self.DOCKER_DNS or "").strip()
+        return ["--dns", dns_server] if dns_server else []
 
     def get_network_ipam_configs(self, network_info: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Normalize docker network IPAM Config to a safe list."""
@@ -622,6 +628,11 @@ class BaseTrafficIngestor(ABC):
             "-e", f"HOST_GID={gid}",
             "--privileged",
         ]
+        dns_args = self.get_docker_dns_args()
+        if dns_args:
+            cmd[3:5] = dns_args
+        else:
+            del cmd[3:5]
         target_network = self.get_target_docker_network()
         if target_network != "bridge":
             cmd += ["--network", target_network]

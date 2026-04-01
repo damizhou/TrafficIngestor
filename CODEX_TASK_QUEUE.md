@@ -53,3 +53,4 @@
 - [x] 已完成并验证：为 `trafficIngestor/base_traffic_ingestor.py` 增加默认运行命名推导，并移除 `trafficIngestor` 各入口脚本中的显式 `BASE_NAME` / `CONTAINER_PREFIX` 配置 - 2026-03-30 15:48
 - [x] 已完成并验证：移除 `github_traffic.py`、`traffic_capture_single_csv_top200000.py`、`traffic_capture_single_csv_fixed_ip_europe.py` 中遗漏的显式 `HOST_CODE_PATH` 配置，并统一改为由基类自动推导 - 2026-03-30 16:02
 - [x] 已完成并验证：检查全部 `action.py` 与自动 `HOST_CODE_PATH` 下的复制逻辑，确认哪些入口会复用现有专用 `action.py`，哪些会回退复制通用主文件 - 2026-03-31 08:56
+- [x] Completed and verified: remove hard-coded `--dns 172.17.0.1` from collector container creation, add optional `DOCKER_DNS` override, and default to Docker daemon DNS for custom bridge networks - 2026-04-01 10:07

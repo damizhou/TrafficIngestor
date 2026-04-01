@@ -25,7 +25,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # ============== 配置 ==============
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_x')
-    BASE_DST = '/netdisk/x_with_ssl_key/collection_without_login_260325'
+    BASE_DST = '/netdisk/x_with_ssl_key/collection_without_login_260401'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 
@@ -36,7 +36,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # 示例：
     # id,url,domain
     # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'x_url_list.csv')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'x_url_list.csv')
 
     def __init__(self):
         super().__init__()

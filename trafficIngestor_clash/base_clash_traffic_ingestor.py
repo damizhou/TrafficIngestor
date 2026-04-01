@@ -340,6 +340,11 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
             "-e", f"DELETE_INVALID_FILES_ON_FAIL={1 if self.DELETE_INVALID_FILES_ON_FAIL else 0}",
             "--privileged",
         ]
+        dns_args = self.get_docker_dns_args()
+        if dns_args:
+            cmd[3:5] = dns_args
+        else:
+            del cmd[3:5]
         target_network = self.get_target_docker_network()
         if target_network != "bridge":
             cmd += ["--network", target_network]
