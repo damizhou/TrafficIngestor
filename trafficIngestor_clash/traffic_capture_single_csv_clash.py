@@ -20,7 +20,7 @@ from trafficIngestor_clash.base_clash_traffic_ingestor import BaseClashTrafficIn
 
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    CONTAINER_COUNT = 1
+    CONTAINER_COUNT = 15 * 10
     BASE_DST = "/netdisk2/ww/trojan/top200000/chrome"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
