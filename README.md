@@ -147,6 +147,20 @@ python -m py_compile tools\base_action.py tools\chrome.py tools\edge.py tools\fi
 - `TRAFFIC_INGESTOR_RUN_NAME=my_firefox_batch python trafficIngestor_clash/traffic_capture_single_csv_firefox_clash.py`
   可选，用显式运行名覆盖默认脚本名隔离规则；适合同一入口脚本并行跑多批任务。
 - 容器内对应目录分别为 `traffic_capture_single_csv_edge_clash/` 与 `traffic_capture_single_csv_firefox_clash/`，仅在原 Edge / Firefox action 基础上额外注入 Clash 代理配置，原有非 Clash 入口不受影响。
+## Trojan 外层解密
+
+- `trafficIngestor_clash/` 基类现在会在容器启动 Clash 时导出 `SSLKEYLOGFILE`，默认路径为 `HOST_CODE_PATH/clash_runtime/<container>/trojan_outer_sslkey.log`。
+- 每个成功任务会额外在结果目录下保存一份 `trojan_outer_ssl_key/<same-prefix>_trojan_outer_sslkey.log` 快照，便于和该任务的外层 `pcap` 一起离线解密。
+- 这一步只负责“传递环境变量并保存 keylog”。真正能否生成外层 keylog，取决于你替换进去的 `clash-for-linux/bin/clash-linux-*` 是否已经基于源码实现了 TLS `KeyLogWriter` 或等价能力；仓库自带的预编译二进制通常不会自动支持。
+- 由于 Clash 进程会在单个容器内复用，保存到任务目录里的 `trojan_outer_sslkey.log` 可能包含该容器此前任务的历史会话密钥；这是刻意保留的，目的是覆盖连接复用场景。Wireshark/TShark 使用包含“多余 key”的 keylog 不会影响当前 `pcap` 解密。
+- 外层解密命令示例：
+
+```powershell
+tshark -r outer.pcap -o tls.keylog_file:trojan_outer_sslkey.log
+```
+
+- 外层 TLS 解开后，首个客户端明文请求仍然带有 Trojan 协议头，需要再剥一次头部。常见格式是 `56` 字节十六进制密码摘要、`\r\n`、SOCKS5 风格目标地址段、`\r\n`，其后才是原始 TCP 载荷；如果目标端口是 `443`，后续字节通常就是你要的 HTTPS/TLS 流量。
+- 仓库附带了一个离线小工具：先导出“解密后的首个客户端明文块”，再运行 `python small_tools/trojan_unwrap.py trojan_client_payload.bin`。脚本会打印目标地址、端口和 header 偏移，并把去掉 Trojan 头之后的内层载荷默认写到 `trojan_client_payload.bin.inner.bin`。
 ## DNS
 
 - Collectors no longer pass `--dns 172.17.0.1` by default.

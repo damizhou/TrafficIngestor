@@ -1,0 +1,80 @@
+# Manual PowerShell commands for fetching Dreamacro/clash v1.18.0 source,
+# patching it locally, building linux amd64 binary, and replacing the repo binary.
+#
+# Run the commands step by step in PowerShell.
+
+# 0) Open PowerShell in the repo root.
+Set-Location E:\Study\Code\TrafficIngestor
+
+# 1) Check that Go is installed.
+go version
+
+# 1.1) If `go version` reports CommandNotFoundException, install Go first.
+# Confirmed on 2026-04-01 via `winget search --id GoLang.Go`:
+#   ID: GoLang.Go
+#   Version: 1.26.1
+winget install -e --id GoLang.Go
+
+# 1.2) Preferred: close the current PowerShell window and open a new one.
+# Then re-enter the repo root and verify:
+Set-Location E:\Study\Code\TrafficIngestor
+go version
+
+# 1.3) If you do not want to reopen PowerShell yet, refresh PATH only for the current window:
+$env:Path = "C:\Program Files\Go\bin;" + $env:Path
+go version
+
+# 1.4) Absolute-path fallback if PATH still does not resolve `go`:
+& 'C:\Program Files\Go\bin\go.exe' version
+
+# 2) Prepare a working directory.
+New-Item -ItemType Directory -Force E:\Study\Code\clash_build | Out-Null
+Set-Location E:\Study\Code\clash_build
+
+# 3) Create a temporary go.mod that pins Dreamacro/clash v1.18.0.
+@'
+module temp
+
+go 1.21
+
+require github.com/Dreamacro/clash v1.18.0
+'@ | Set-Content .\go.mod -Encoding ascii
+
+# 4) Download the module into the Go module cache.
+$env:GOPROXY = "https://proxy.golang.org,direct"
+go mod download github.com/Dreamacro/clash@v1.18.0
+
+# 5) Copy the cached source into a writable directory.
+$modcache = (go env GOMODCACHE).Trim()
+Remove-Item -Recurse -Force .\clash_src -ErrorAction SilentlyContinue
+Copy-Item -Recurse -Force "$modcache\github.com\!dreamacro\clash@v1.18.0" .\clash_src
+
+# 6) Open and patch the source here before continuing:
+Set-Location .\clash_src
+Get-Location
+
+# 7) After patching, build a linux amd64 binary.
+$env:CGO_ENABLED = "0"
+$env:GOOS = "linux"
+$env:GOARCH = "amd64"
+go build -trimpath -ldflags "-s -w" -o ..\clash-linux-amd64 .
+
+# 8) Back up the current repo binary.
+Copy-Item -Force E:\Study\Code\TrafficIngestor\clash-for-linux\bin\clash-linux-amd64 E:\Study\Code\TrafficIngestor\clash-for-linux\bin\clash-linux-amd64.bak
+
+# 9) Replace the repo binary with the newly built one.
+Copy-Item -Force E:\Study\Code\clash_build\clash-linux-amd64 E:\Study\Code\TrafficIngestor\clash-for-linux\bin\clash-linux-amd64
+
+# 10) Optional: compare hashes and file timestamps.
+Get-FileHash E:\Study\Code\TrafficIngestor\clash-for-linux\bin\clash-linux-amd64
+Get-Item E:\Study\Code\TrafficIngestor\clash-for-linux\bin\clash-linux-amd64 | Select-Object FullName,Length,LastWriteTime
+
+# 11) Recreate the test container and rerun the collector.
+docker rm -f pcz_traffic_capture_single_csv_clash0
+Set-Location E:\Study\Code\TrafficIngestor
+python .\trafficIngestor_clash\traffic_capture_single_csv_clash.py
+
+# 12) After the run starts, check whether the outer TLS key log appears.
+docker exec -it pcz_traffic_capture_single_csv_clash0 /bin/bash
+# Inside the container:
+ls -l /app/clash_runtime/pcz_traffic_capture_single_csv_clash0

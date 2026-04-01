@@ -30,6 +30,9 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
     CLASH_TEMPLATE_CONFIG_PATH: str = os.path.join(_project_root, "config", "config.yaml")
     CLASH_RUNTIME_DIR_NAME: str = "clash_runtime"
     CLASH_PORT: int = 7890
+    CLASH_TLS_KEYLOG_FILENAME: str = "trojan_outer_sslkey.log"
+    CLASH_TLS_KEYLOG_RESULT_SUBDIR: str = "trojan_outer_ssl_key"
+    CLASH_TLS_KEYLOG_SNAPSHOT_DIR_NAME: str = "trojan_outer_sslkey_snapshots"
     CLASH_READY_TIMEOUT: int = 60
     CLASH_START_TIMEOUT: int = 180
     CLASH_NODE_PLACEHOLDER_NAME: str = "vpnnodename"
@@ -237,6 +240,12 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
     def get_clash_runtime_container_dir(self, name: str) -> str:
         return f"{self.CONTAINER_CODE_PATH}/{self.CLASH_RUNTIME_DIR_NAME}/{name}"
 
+    def get_clash_outer_tls_keylog_host_path(self, name: str) -> Path:
+        return self.get_clash_runtime_host_dir(name) / self.CLASH_TLS_KEYLOG_FILENAME
+
+    def get_clash_outer_tls_keylog_container_path(self, name: str) -> str:
+        return f"{self.get_clash_runtime_container_dir(name)}/{self.CLASH_TLS_KEYLOG_FILENAME}"
+
     def build_clash_proxy_config(self, name: str) -> Dict[str, Any]:
         vpn = dict(self.get_vpn_for_container(name))
         vpn["name"] = self.CLASH_NODE_PLACEHOLDER_NAME
@@ -281,6 +290,45 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
         if not config_text.endswith("\n"):
             config_text += "\n"
         (runtime_dir / "config.yaml").write_text(config_text, encoding="utf-8")
+
+    def snapshot_clash_outer_tls_keylog(self, name: str, result: Dict[str, Any]) -> Optional[str]:
+        source_path = self.get_clash_outer_tls_keylog_host_path(name)
+        if not source_path.is_file():
+            self.log(
+                f"WARNING: {name} 缺少 Trojan 外层 TLS keylog: {source_path}; "
+                "请确认已替换支持 SSLKEYLOGFILE 的 Clash/Trojan core"
+            )
+            return None
+
+        ssl_key_name = os.path.basename(str(result.get("ssl_key_file_path", "")).strip())
+        if ssl_key_name.endswith("_ssl_key.log"):
+            snapshot_name = ssl_key_name[:-len("_ssl_key.log")] + "_trojan_outer_sslkey.log"
+        elif ssl_key_name:
+            snapshot_name = f"{Path(ssl_key_name).stem}_trojan_outer_sslkey.log"
+        else:
+            snapshot_name = f"{name}_trojan_outer_sslkey.log"
+
+        snapshot_dir = self.get_clash_runtime_host_dir(name) / self.CLASH_TLS_KEYLOG_SNAPSHOT_DIR_NAME
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_path = snapshot_dir / snapshot_name
+        shutil.copy2(source_path, snapshot_path)
+        return str(snapshot_path)
+
+    def build_additional_result_moves(
+        self,
+        task: Dict[str, str],
+        result: Dict[str, Any],
+        dst: str,
+    ) -> Dict[str, tuple[str, str]]:
+        moves = super().build_additional_result_moves(task, result, dst)
+        container = str(task.get("container", "")).strip()
+        if not container:
+            return moves
+
+        snapshot_path = self.snapshot_clash_outer_tls_keylog(container, result)
+        if snapshot_path:
+            moves["trojan_outer_ssl_key"] = (snapshot_path, self.CLASH_TLS_KEYLOG_RESULT_SUBDIR)
+        return moves
 
     def prepare_pool_once(self) -> List[str]:
         if not os.path.isdir(self.CLASH_HOST_PATH):
@@ -434,6 +482,7 @@ PY
     def ensure_clash_ready(self, name: str) -> None:
         clash_container_path = self.get_clash_container_path()
         runtime_dir = self.get_clash_runtime_container_dir(name)
+        keylog_file = self.get_clash_outer_tls_keylog_container_path(name)
         shell = f"""
 set -e
 CLASH_DIR="{clash_container_path}"
@@ -442,6 +491,9 @@ CONFIG_FILE="$CLASH_DIR/conf/config.yaml"
 MMDB_FILE="$CLASH_DIR/conf/Country.mmdb"
 START_LOG="$RUNTIME_DIR/clash.start.log"
 LOG_FILE="$CLASH_DIR/logs/clash.log"
+KEYLOG_FILE="{keylog_file}"
+
+mkdir -p "$RUNTIME_DIR"
 
 if [ ! -d "$CLASH_DIR" ]; then
     echo "clash directory not found: $CLASH_DIR" >&2
@@ -460,7 +512,8 @@ if python -c "import socket; s = socket.create_connection(('127.0.0.1', {self.CL
     exit 0
 fi
 
-rm -f "$START_LOG" "$LOG_FILE"
+rm -f "$START_LOG" "$LOG_FILE" "$KEYLOG_FILE"
+export SSLKEYLOGFILE="$KEYLOG_FILE"
 if ! bash "$CLASH_DIR/start.sh" >"$START_LOG" 2>&1; then
     cat "$START_LOG" >&2 || true
     cat "$LOG_FILE" >&2 || true

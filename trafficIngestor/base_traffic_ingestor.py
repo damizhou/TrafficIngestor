@@ -1158,17 +1158,37 @@ class BaseTrafficIngestor(ABC):
         new_html = self.move_and_chown(html_path, os.path.join(dst, 'html'))
         new_screenshot = self.move_and_chown(screenshot_path, os.path.join(dst, 'screenshot'))
 
+        extra_saved_paths: Dict[str, str] = {}
+        for key, (src_path, dst_subdir) in self.build_additional_result_moves(task, result, dst).items():
+            if not src_path:
+                continue
+            if not os.path.exists(src_path):
+                self.log(f"WARNING: extra result file missing: {key} -> {src_path}")
+                continue
+            extra_saved_paths[key] = self.move_and_chown(src_path, os.path.join(dst, dst_subdir))
+
         # 调用成功回调
-        self.on_task_success(task, {
+        success_paths = {
             'pcap': new_pcap,
             'ssl_key': new_ssl,
             'content': new_content,
             'html': new_html,
             'screenshot': new_screenshot,
             'current_url': current_url
-        })
+        }
+        success_paths.update(extra_saved_paths)
+        self.on_task_success(task, success_paths)
 
         return True, ""
+
+    def build_additional_result_moves(
+        self,
+        task: Dict[str, str],
+        result: Dict[str, Any],
+        dst: str,
+    ) -> Dict[str, Tuple[str, str]]:
+        """Return extra host files to persist as key -> (src_path, dst_subdir)."""
+        return {}
 
     def on_task_success(self, task: Dict[str, str], paths: Dict[str, str]) -> None:
         """任务成功回调，子类可覆盖（如写数据库）"""

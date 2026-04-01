@@ -23,7 +23,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
 
     # ============== 配置 ==============
-    CONTAINER_COUNT = 15 * 10
+    CONTAINER_COUNT = 15 * 5
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_threads')
     BASE_DST = '/netdisk/lyl/0401/chrome/without_login'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
