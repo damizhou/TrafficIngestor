@@ -15,7 +15,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_current_dir)
@@ -33,6 +33,7 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
     CLASH_TLS_KEYLOG_FILENAME: str = "trojan_outer_sslkey.log"
     CLASH_TLS_KEYLOG_RESULT_SUBDIR: str = "trojan_outer_ssl_key"
     CLASH_TLS_KEYLOG_SNAPSHOT_DIR_NAME: str = "trojan_outer_sslkey_snapshots"
+    CLASH_TLS_KEYLOG_TASK_OFFSET_KEY: str = "_trojan_outer_sslkey_start_offset"
     CLASH_READY_TIMEOUT: int = 60
     CLASH_START_TIMEOUT: int = 180
     CLASH_NODE_PLACEHOLDER_NAME: str = "vpnnodename"
@@ -246,6 +247,32 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
     def get_clash_outer_tls_keylog_container_path(self, name: str) -> str:
         return f"{self.get_clash_runtime_container_dir(name)}/{self.CLASH_TLS_KEYLOG_FILENAME}"
 
+    def get_task_clash_outer_tls_keylog_start_offset(self, task: Dict[str, Any]) -> int:
+        raw_value = task.get(self.CLASH_TLS_KEYLOG_TASK_OFFSET_KEY, 0)
+        try:
+            return max(int(raw_value), 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def record_task_clash_outer_tls_keylog_start_offset(self, task: Dict[str, Any], name: str) -> int:
+        source_path = self.get_clash_outer_tls_keylog_host_path(name)
+        offset = 0
+        if source_path.is_file():
+            try:
+                offset = max(int(source_path.stat().st_size), 0)
+            except OSError:
+                offset = 0
+        task[self.CLASH_TLS_KEYLOG_TASK_OFFSET_KEY] = offset
+        return offset
+
+    def build_clash_outer_tls_keylog_snapshot_name(self, result: Dict[str, Any], name: str) -> str:
+        pcap_name = os.path.basename(str(result.get("pcap_path", "")).strip())
+        if pcap_name.endswith(".pcap"):
+            return pcap_name[:-len(".pcap")] + "_trojan_outer_sslkey.log"
+        if pcap_name:
+            return f"{Path(pcap_name).stem}_trojan_outer_sslkey.log"
+        return f"{name}_trojan_outer_sslkey.log"
+
     def build_clash_proxy_config(self, name: str) -> Dict[str, Any]:
         vpn = dict(self.get_vpn_for_container(name))
         vpn["name"] = self.CLASH_NODE_PLACEHOLDER_NAME
@@ -291,7 +318,12 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
             config_text += "\n"
         (runtime_dir / "config.yaml").write_text(config_text, encoding="utf-8")
 
-    def snapshot_clash_outer_tls_keylog(self, name: str, result: Dict[str, Any]) -> Optional[str]:
+    def snapshot_clash_outer_tls_keylog(
+        self,
+        name: str,
+        task: Dict[str, Any],
+        result: Dict[str, Any],
+    ) -> Optional[str]:
         source_path = self.get_clash_outer_tls_keylog_host_path(name)
         if not source_path.is_file():
             self.log(
@@ -300,19 +332,40 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
             )
             return None
 
-        ssl_key_name = os.path.basename(str(result.get("ssl_key_file_path", "")).strip())
-        if ssl_key_name.endswith("_ssl_key.log"):
-            snapshot_name = ssl_key_name[:-len("_ssl_key.log")] + "_trojan_outer_sslkey.log"
-        elif ssl_key_name:
-            snapshot_name = f"{Path(ssl_key_name).stem}_trojan_outer_sslkey.log"
-        else:
-            snapshot_name = f"{name}_trojan_outer_sslkey.log"
+        start_offset = self.get_task_clash_outer_tls_keylog_start_offset(task)
+        try:
+            current_size = max(int(source_path.stat().st_size), 0)
+        except OSError as exc:
+            self.log(f"WARNING: {name} 无法读取 Trojan 外层 TLS keylog 大小: {source_path} -> {exc}")
+            return None
+
+        if start_offset > current_size:
+            self.log(
+                f"WARNING: {name} Trojan 外层 TLS keylog 起始偏移超出当前文件大小，"
+                f"将从头截取: offset={start_offset}, size={current_size}"
+            )
+            start_offset = 0
+
+        snapshot_name = self.build_clash_outer_tls_keylog_snapshot_name(result, name)
 
         snapshot_dir = self.get_clash_runtime_host_dir(name) / self.CLASH_TLS_KEYLOG_SNAPSHOT_DIR_NAME
         snapshot_dir.mkdir(parents=True, exist_ok=True)
         snapshot_path = snapshot_dir / snapshot_name
-        shutil.copy2(source_path, snapshot_path)
+        with open(source_path, "rb") as src, open(snapshot_path, "wb") as dst_f:
+            src.seek(start_offset)
+            shutil.copyfileobj(src, dst_f)
+        if snapshot_path.stat().st_size == 0:
+            self.log(
+                f"WARNING: {name} 当前任务未产生新增的 Trojan 外层 TLS keylog: "
+                f"{snapshot_name}; 可能复用了已有 TLS 会话"
+            )
         return str(snapshot_path)
+
+    def exec_once(self, task: Dict[str, str]) -> Tuple[bool, str]:
+        container = str(task.get("container", "")).strip()
+        if container:
+            self.record_task_clash_outer_tls_keylog_start_offset(task, container)
+        return super().exec_once(task)
 
     def build_additional_result_moves(
         self,
@@ -325,7 +378,7 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
         if not container:
             return moves
 
-        snapshot_path = self.snapshot_clash_outer_tls_keylog(container, result)
+        snapshot_path = self.snapshot_clash_outer_tls_keylog(container, task, result)
         if snapshot_path:
             moves["trojan_outer_ssl_key"] = (snapshot_path, self.CLASH_TLS_KEYLOG_RESULT_SUBDIR)
         return moves

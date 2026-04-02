@@ -54,8 +54,13 @@
 - [x] 已完成并验证：移除 `github_traffic.py`、`traffic_capture_single_csv_top200000.py`、`traffic_capture_single_csv_fixed_ip_europe.py` 中遗漏的显式 `HOST_CODE_PATH` 配置，并统一改为由基类自动推导 - 2026-03-30 16:02
 - [x] 已完成并验证：检查全部 `action.py` 与自动 `HOST_CODE_PATH` 下的复制逻辑，确认哪些入口会复用现有专用 `action.py`，哪些会回退复制通用主文件 - 2026-03-31 08:56
 - [x] Completed and verified: remove hard-coded `--dns 172.17.0.1` from collector container creation, add optional `DOCKER_DNS` override, and default to Docker daemon DNS for custom bridge networks - 2026-04-01 10:07
+- [x] Completed and verified: fix Dreamacro/clash Trojan outer TLS keylog patch by making the keylog writer a process-wide singleton and adding KeyLogWriter to the gRPC TLS path; verified with `go build ./...` - 2026-04-02 00:20
+- [x] Completed and verified: update Clash outer TLS keylog snapshots to record per-task start offsets and save one task-scoped keylog file named from the pcap basename; verified with `python -m py_compile trafficIngestor_clash\\base_clash_traffic_ingestor.py` - 2026-04-02 00:32
+- [x] Completed and verified: add `small_tools/decrypt_trojan_outer_pcap.py` to process `pcap + trojan_outer_sslkey.log` pairs via `tshark follow,tls`, strip Trojan headers, and emit inner payload files; verified with `python -m py_compile` and a real temp pcap/keylog pair - 2026-04-02 00:45
 - [x] 已完成并验证：新增 `small_tools/build_clash_manual_commands.txt`，提供手动逐条执行的 Clash 源码拉取、编译、替换与复测命令清单 - 2026-04-01 16:45
 - [x] 已完成并验证：修复 `small_tools/build_clash_from_goproxy.ps1` 中 `param(...)` 位置错误导致的 PowerShell 解析失败 - 2026-04-01 16:40
 - [x] 宸插畬鎴愬苟楠岃瘉锛氫负 `trafficIngestor_clash` 澧炲姞 Trojan 澶栧眰 TLS keylog 瀵煎嚭銆佺粨鏋滃揩鐓т繚瀛樹笌绂荤嚎瑙ｅ寘璇存槑/宸ュ叿 - 2026-04-01 16:04
 - [x] 已完成并验证：新增 `small_tools/build_clash_from_goproxy.ps1`，用于通过 Go 模块缓存拉取 `github.com/Dreamacro/clash v1.18.0` 源码、编译 Linux amd64 二进制并可选覆盖仓库内 `clash-linux-amd64` - 2026-04-01 16:36
 - [x] 已完成并验证：为 `trafficIngestor_clash` 增加 Trojan 外层 TLS keylog 导出、结果快照保存与离线解包说明/工具 - 2026-04-01 16:04
+- [x] Completed and verified: improve Clash Chrome capture success rate in `trafficIngestor_clash/traffic_capture_single_csv_clash.py` by adding limited in-task navigation retries and relaxing false low-keylog failures; verified with `python -m py_compile tools\\base_action.py traffic_capture_single_csv_clash\\action.py trafficIngestor_clash\\traffic_capture_single_csv_clash.py` - 2026-04-02 10:34
+- [x] Completed and verified: add error-focused Clash Chrome diagnostics by logging richer browser failure summaries and Clash runtime log tails without adding extra success-path process logs; verified with `python -m py_compile tools\\base_action.py tools\\chrome.py traffic_capture_single_csv_clash\\action.py trafficIngestor_clash\\traffic_capture_single_csv_clash.py` - 2026-04-02 11:12

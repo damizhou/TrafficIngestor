@@ -1,0 +1,154 @@
+Dreamacro/clash v1.18.0 Trojan outer TLS keylog patch notes
+
+Context
+- The current collector exports `SSLKEYLOGFILE` before starting Clash.
+- Vanilla `github.com/Dreamacro/clash v1.18.0` does not read that env var.
+- Your current node `la01` is plain `type: trojan` on port 443, so the main outer TLS handshake path is:
+  - `transport/trojan/trojan.go`
+- For plain Trojan nodes, patching this file is sufficient.
+
+File 1
+- Path: `E:\Study\Code\clash_build\clash_src\transport\trojan\trojan.go`
+
+1) Add `os` to imports.
+
+Before:
+```go
+import (
+    "context"
+    "crypto/sha256"
+    "crypto/tls"
+    "encoding/binary"
+    "encoding/hex"
+    "errors"
+    "io"
+    "net"
+    "net/http"
+    "sync"
+```
+
+After:
+```go
+import (
+    "context"
+    "crypto/sha256"
+    "crypto/tls"
+    "encoding/binary"
+    "encoding/hex"
+    "errors"
+    "io"
+    "net"
+    "net/http"
+    "os"
+    "sync"
+```
+
+2) Add this helper below the existing `var (...)` block.
+
+```go
+func openTLSKeyLogWriter() io.Writer {
+    path := os.Getenv("SSLKEYLOGFILE")
+    if path == "" {
+        return nil
+    }
+
+    f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+    if err != nil {
+        return nil
+    }
+
+    return f
+}
+```
+
+3) In `func (t *Trojan) StreamConn(...)`, add `KeyLogWriter`.
+
+Before:
+```go
+tlsConfig := &tls.Config{
+    NextProtos:         alpn,
+    MinVersion:         tls.VersionTLS12,
+    InsecureSkipVerify: t.option.SkipCertVerify,
+    ServerName:         t.option.ServerName,
+}
+```
+
+After:
+```go
+tlsConfig := &tls.Config{
+    NextProtos:         alpn,
+    MinVersion:         tls.VersionTLS12,
+    InsecureSkipVerify: t.option.SkipCertVerify,
+    ServerName:         t.option.ServerName,
+    KeyLogWriter:       openTLSKeyLogWriter(),
+}
+```
+
+4) In `func (t *Trojan) StreamWebsocketConn(...)`, also add `KeyLogWriter`.
+
+Before:
+```go
+tlsConfig := &tls.Config{
+    NextProtos:         alpn,
+    MinVersion:         tls.VersionTLS12,
+    InsecureSkipVerify: t.option.SkipCertVerify,
+    ServerName:         t.option.ServerName,
+}
+```
+
+After:
+```go
+tlsConfig := &tls.Config{
+    NextProtos:         alpn,
+    MinVersion:         tls.VersionTLS12,
+    InsecureSkipVerify: t.option.SkipCertVerify,
+    ServerName:         t.option.ServerName,
+    KeyLogWriter:       openTLSKeyLogWriter(),
+}
+```
+
+Optional file 2
+- Path: `E:\Study\Code\clash_build\clash_src\adapter\outbound\trojan.go`
+- Only needed if later you use Trojan over `grpc`.
+- In the `option.Network == "grpc"` branch, add the same `KeyLogWriter` field on that branch's `tls.Config`.
+- The simplest approach is to add a small local helper in that file too:
+
+```go
+func openTLSKeyLogWriter() io.Writer {
+    path := os.Getenv("SSLKEYLOGFILE")
+    if path == "" {
+        return nil
+    }
+
+    f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+    if err != nil {
+        return nil
+    }
+
+    return f
+}
+```
+
+Then set:
+
+```go
+KeyLogWriter: openTLSKeyLogWriter(),
+```
+
+But if you keep the current plain `la01` node, you do not need this second patch first.
+
+After editing
+1. Rebuild:
+   `go build -trimpath -ldflags "-s -w" -o ..\clash-linux-amd64 .`
+2. Replace repo binary:
+   `Copy-Item -Force E:\Study\Code\clash_build\clash-linux-amd64 E:\Study\Code\TrafficIngestor\clash-for-linux\bin\clash-linux-amd64`
+3. Recreate container and rerun collector.
+4. Inside the container, check:
+   `ls -l /app/clash_runtime/pcz_traffic_capture_single_csv_clash0`
+5. If the patch is active, `trojan_outer_sslkey.log` should appear after any outbound Trojan TLS handshake attempt.
+
+Sanity check
+- If `trojan_outer_sslkey.log` still does not appear, then either:
+  - you rebuilt without saving the source edits, or
+  - the repo binary was not replaced, or
+  - the running container still uses an old binary.

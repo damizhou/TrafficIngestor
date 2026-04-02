@@ -80,7 +80,7 @@ def is_docker():
 
 def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
                           enable_ssl_key_log=True, data_base_dir=None,
-                          proxy_server=None, proxy_bypass_list=None):
+                          proxy_server=None, proxy_bypass_list=None, logger=None):
     """
     创建Chrome浏览器驱动
 
@@ -157,7 +157,6 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
     # SSL密钥日志
     if ssl_key_file_path:
         chrome_options.add_argument(f"--ssl-key-log-file={ssl_key_file_path}")
-        print(f"SSL 密钥日志文件路径: {ssl_key_file_path}")
 
     # 设置实验性首选项
     prefs = {
@@ -176,8 +175,9 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
     chrome_options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
     # 创建 WebDriver 实例
-    if is_docker():
-        service = Service(executable_path="/usr/local/bin/chromedriver")
+    service_executable_path = "/usr/local/bin/chromedriver" if is_docker() else None
+    if service_executable_path:
+        service = Service(executable_path=service_executable_path)
     else:
         service = Service()
 
@@ -201,6 +201,106 @@ def _safe_driver_value(getter):
         return getter(), None
     except Exception as e:
         return None, f"{type(e).__name__}: {str(e).splitlines()[0]}"
+
+
+def _parse_performance_entries(perf_entries):
+    request_meta = {}
+    responses = []
+    failures = []
+    loading_finished_count = 0
+
+    for entry in perf_entries or ():
+        try:
+            message = json.loads(entry["message"]).get("message", {})
+        except Exception:
+            continue
+
+        method = message.get("method")
+        params = message.get("params", {})
+        request_id = params.get("requestId")
+
+        if method == "Network.requestWillBeSent" and request_id:
+            request = params.get("request", {})
+            request_meta[request_id] = {
+                "url": request.get("url", ""),
+                "method": request.get("method", ""),
+            }
+        elif method == "Network.responseReceived" and request_id:
+            response = params.get("response", {})
+            meta = request_meta.get(request_id, {})
+            responses.append({
+                "url": meta.get("url", "") or response.get("url", ""),
+                "method": meta.get("method", ""),
+                "type": params.get("type", ""),
+                "status": response.get("status", ""),
+                "mimeType": response.get("mimeType", ""),
+                "protocol": response.get("protocol", ""),
+                "remoteIPAddress": response.get("remoteIPAddress", ""),
+                "fromDiskCache": response.get("fromDiskCache", False),
+                "fromServiceWorker": response.get("fromServiceWorker", False),
+            })
+        elif method == "Network.loadingFailed":
+            meta = request_meta.get(request_id, {})
+            failures.append({
+                "url": meta.get("url", ""),
+                "method": meta.get("method", ""),
+                "type": params.get("type", ""),
+                "errorText": params.get("errorText", ""),
+                "canceled": params.get("canceled", False),
+                "blockedReason": params.get("blockedReason", ""),
+            })
+        elif method == "Network.loadingFinished":
+            loading_finished_count += 1
+
+    return responses, failures, loading_finished_count
+
+
+def build_performance_log_summary(perf_entries, requested_url="", max_events=5):
+    responses, failures, loading_finished_count = _parse_performance_entries(perf_entries)
+    summary = {
+        "response_count": len(responses),
+        "loading_finished_count": loading_finished_count,
+        "failure_count": len(failures),
+    }
+
+    document_responses = [item for item in responses if item.get("type") == "Document"]
+    if requested_url:
+        matched_document_responses = [
+            item for item in document_responses
+            if item.get("url") == requested_url
+        ]
+        if matched_document_responses:
+            document_responses = matched_document_responses
+    if document_responses:
+        summary["document_responses"] = document_responses[-max_events:]
+
+    http_error_responses = []
+    for item in responses:
+        status = item.get("status")
+        try:
+            status_code = int(status)
+        except (TypeError, ValueError):
+            continue
+        if status_code >= 400:
+            http_error_responses.append(item)
+    if http_error_responses:
+        summary["http_error_responses"] = http_error_responses[-max_events:]
+
+    if failures:
+        summary["network_failures"] = failures[-max_events:]
+
+    return summary
+
+
+def get_driver_performance_log_summary(driver, requested_url="", max_events=5):
+    perf_entries, perf_err = _safe_driver_value(lambda: driver.get_log("performance"))
+    if perf_entries is None:
+        return {"performance_log_error": perf_err} if perf_err else {}
+    return build_performance_log_summary(
+        perf_entries,
+        requested_url=requested_url,
+        max_events=max_events,
+    )
 
 
 def build_browser_error_diagnostics(driver, requested_url, netlog_path="/tmp/netlog.json", max_events=3):
@@ -240,39 +340,15 @@ def build_browser_error_diagnostics(driver, requested_url, netlog_path="/tmp/net
 
     perf_entries, perf_err = _safe_driver_value(lambda: driver.get_log("performance"))
     if perf_entries is not None:
-        request_meta = {}
-        failures = []
-        for entry in perf_entries:
-            try:
-                message = json.loads(entry["message"]).get("message", {})
-            except Exception:
-                continue
-
-            method = message.get("method")
-            params = message.get("params", {})
-            request_id = params.get("requestId")
-
-            if method == "Network.requestWillBeSent" and request_id:
-                request = params.get("request", {})
-                request_meta[request_id] = {
-                    "url": request.get("url", ""),
-                    "method": request.get("method", ""),
-                }
-            elif method == "Network.loadingFailed":
-                meta = request_meta.get(request_id, {})
-                failures.append({
-                    "url": meta.get("url", ""),
-                    "method": meta.get("method", ""),
-                    "type": params.get("type", ""),
-                    "errorText": params.get("errorText", ""),
-                    "canceled": params.get("canceled", False),
-                    "blockedReason": params.get("blockedReason", ""),
-                })
-
-        if failures:
+        perf_summary = build_performance_log_summary(
+            perf_entries,
+            requested_url=requested_url,
+            max_events=max_events,
+        )
+        if perf_summary:
             details.append(
-                "network_failures="
-                + json.dumps(failures[-max_events:], ensure_ascii=False, separators=(",", ":"))
+                "performance_summary="
+                + json.dumps(perf_summary, ensure_ascii=False, separators=(",", ":"))
             )
     elif perf_err:
         details.append(f"performance_log_error={perf_err}")
@@ -289,7 +365,7 @@ def build_browser_error_diagnostics(driver, requested_url, netlog_path="/tmp/net
 
 
 def open_url_and_save_content(driver, url, ssl_key_file_path, wait_secs=8,
-                               save_screenshot=True, data_base_dir=None):
+                               save_screenshot=True, data_base_dir=None, logger=None):
     """
     打开URL并保存内容
 

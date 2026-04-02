@@ -27,6 +27,69 @@ from tools.chrome import (
 from tools.logger import setup_logging
 
 
+class TaskScopedLogger:
+    """Buffer info/debug task logs until the task outcome is known."""
+
+    def __init__(self, base_logger):
+        self._base_logger = base_logger
+        self._buffer = []
+        self._failure_mode = False
+
+    def _render(self, msg, args):
+        if not args:
+            return str(msg)
+        try:
+            return str(msg) % args
+        except Exception:
+            parts = [str(msg)]
+            parts.extend(str(arg) for arg in args)
+            return " ".join(parts)
+
+    def _flush_buffer(self):
+        if not self._buffer:
+            return
+        for level, rendered in self._buffer:
+            getattr(self._base_logger, level)(rendered)
+        self._buffer.clear()
+
+    def debug(self, msg, *args, **kwargs):
+        self._buffer.append(("debug", self._render(msg, args)))
+
+    def info(self, msg, *args, **kwargs):
+        self._buffer.append(("info", self._render(msg, args)))
+
+    def warning(self, msg, *args, **kwargs):
+        if not self._failure_mode:
+            self._flush_buffer()
+            self._failure_mode = True
+        self._base_logger.warning(msg, *args, **kwargs)
+
+    def error(self, msg, *args, **kwargs):
+        if not self._failure_mode:
+            self._flush_buffer()
+            self._failure_mode = True
+        self._base_logger.error(msg, *args, **kwargs)
+
+    def critical(self, msg, *args, **kwargs):
+        if not self._failure_mode:
+            self._flush_buffer()
+            self._failure_mode = True
+        self._base_logger.critical(msg, *args, **kwargs)
+
+    def exception(self, msg, *args, **kwargs):
+        if not self._failure_mode:
+            self._flush_buffer()
+            self._failure_mode = True
+        self._base_logger.exception(msg, *args, **kwargs)
+
+    def emit_success_summary(self, message):
+        self._buffer.clear()
+        self._base_logger.info(message)
+
+    def __getattr__(self, item):
+        return getattr(self._base_logger, item)
+
+
 class BaseAction(ABC):
     """
     Action基类，封装流量捕获任务的公共逻辑
@@ -40,6 +103,7 @@ class BaseAction(ABC):
 
     def __init__(self):
         self.allowed_domain = ""
+        self.container_name = ""
         self.logger = None  # 延迟初始化，等获取到容器名称后再设置
         self._start_reaper()
 
@@ -79,13 +143,15 @@ class BaseAction(ABC):
             data_base_dir=_project_root,
             proxy_server=self.get_browser_proxy_server(),
             proxy_bypass_list=self.get_browser_proxy_bypass_list(),
+            logger=self.logger,
         )
 
     def open_and_save_content(self, browser, url, ssl_key_file_path):
         """打开页面并保存内容，子类可覆盖。"""
         return open_url_and_save_content(
             browser, url, ssl_key_file_path,
-            data_base_dir=_project_root
+            data_base_dir=_project_root,
+            logger=self.logger,
         )
 
     def get_capture_exclude_hosts(self):
@@ -99,6 +165,12 @@ class BaseAction(ABC):
     def get_browser_proxy_bypass_list(self):
         """返回浏览器代理绕过列表；默认不设置。"""
         return None
+
+    def get_browser_startup_settle_seconds(self):
+        return 0.0
+
+    def use_task_scoped_logger(self):
+        return False
 
     def clean_old_files(self, meta_path):
         """清理旧文件"""
@@ -209,10 +281,15 @@ class BaseAction(ABC):
         row_id = payload["row_id"]
         url = payload["url"]
         self.allowed_domain = payload["domain"]
+        self.container_name = container
 
         # 初始化 logger（使用容器名称区分日志文件）
         if self.logger is None:
             self.logger = setup_logging(container_name=container)
+        base_logger = self.logger
+        use_task_scoped_logger = self.use_task_scoped_logger()
+        if use_task_scoped_logger:
+            self.logger = TaskScopedLogger(base_logger)
 
         # 清理旧文件
         meta_path = os.path.join(_project_root, "meta", f"{container}_last.json")
@@ -236,11 +313,21 @@ class BaseAction(ABC):
 
         try:
             traffic_thread = self.start_capture_thread(row_id, formatted_time)
-            self.logger.info(f"创建{self.browser_name}浏览器")
-            browser, ssl_key_file_path = self.create_browser_driver(formatted_time, row_id)
         except Exception as e:
             open_url_error = repr(e).replace("\n", " ")
-            self.logger.error(f"浏览器初始化异常: {e}")
+            self.logger.error(f"抓包初始化异常: {e}")
+
+        if traffic_thread is not None:
+            settle_seconds = max(float(self.get_browser_startup_settle_seconds()), 0.0)
+            try:
+                self.logger.info(f"创建{self.browser_name}浏览器")
+                browser, ssl_key_file_path = self.create_browser_driver(formatted_time, row_id)
+                if settle_seconds > 0:
+                    self.logger.info(f"等待{self.browser_name}启动稳定 {settle_seconds:.1f} 秒")
+                    time.sleep(settle_seconds)
+            except Exception as e:
+                open_url_error = repr(e).replace("\n", " ")
+                self.logger.error(f"浏览器初始化异常: {e}")
 
         if browser is not None:
             self.logger.info(f"开始访问第{row_id}的词条：{url}")
@@ -248,6 +335,7 @@ class BaseAction(ABC):
                 content_path, html_path, screenshot_path, current_url = self.open_and_save_content(
                     browser, url, ssl_key_file_path
                 )
+                open_url_error = ""
             except Exception as e:
                 open_url_error = repr(e).replace("\n", " ")
                 self.logger.error(f"open_url_and_save_content 异常: {e}")
@@ -256,11 +344,11 @@ class BaseAction(ABC):
                 except Exception as diag_error:
                     diagnostic = f"collect_diagnostic_failed={type(diag_error).__name__}: {diag_error}"
                 self.logger.error(f"open_url_and_save_content 诊断: {diagnostic}")
-
-            try:
-                browser.quit()
-            except Exception as e:
-                self.logger.warning(f"browser.quit() 异常: {e}")
+            finally:
+                try:
+                    browser.quit()
+                except Exception as e:
+                    self.logger.warning(f"browser.quit() 异常: {e}")
 
         self.logger.info("清理浏览器进程(兜底)")
         self.kill_browser_processes()
@@ -335,7 +423,17 @@ class BaseAction(ABC):
 
         self.write_result(meta_path, result)
 
+        if validation_passed and use_task_scoped_logger:
+            pcap_size = os.path.getsize(pcap_path) if pcap_path and os.path.exists(pcap_path) else -1
+            ssl_key_size = os.path.getsize(ssl_key_file_path) if ssl_key_file_path and os.path.exists(ssl_key_file_path) else -1
+            self.logger.emit_success_summary(
+                f"任务成功: row_id={row_id} | requested_url={url} | current_url={current_url} | "
+                f"pcap_size={pcap_size} | ssl_key_size={ssl_key_size}"
+            )
+
         time.sleep(1)
+        if use_task_scoped_logger:
+            self.logger = base_logger
 
     @classmethod
     def run_from_argv(cls):
