@@ -20,14 +20,14 @@ from trafficIngestor_clash.base_clash_traffic_ingestor import BaseClashTrafficIn
 
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    CONTAINER_COUNT = 1
+    CONTAINER_COUNT = 15
     BASE_DST = "/netdisk2/test"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False
-    # CSV_PATH = os.path.join(_project_root, "small_tools", "result", "top300000_ingestor.csv")
-
-    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "test.csv")
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "top300000_ingestor.csv")
+    #
+    # CSV_PATH = os.path.join(_project_root, "small_tools", "result", "test.csv")
     def __init__(self):
         super().__init__()
         self._has_jobs = True

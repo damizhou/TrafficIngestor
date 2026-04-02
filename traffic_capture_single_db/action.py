@@ -18,7 +18,7 @@ class NewsReceiverAction(BaseAction):
 
     # 默认阈值（可按站点调整）
     pcap_lowest_size = 100000
-    ssl_key_lowest_size = 1000
+    ssl_key_lowest_size = 128
 
     def check_page_not_found(self, html_path, domain):
         """

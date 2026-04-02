@@ -22,7 +22,7 @@ class XCaptureEdgeClashAction(BaseAction):
     """Edge Clash 流量抓取 Action"""
 
     pcap_lowest_size = 100000
-    ssl_key_lowest_size = 1000
+    ssl_key_lowest_size = 128
     browser_name = "Edge"
 
     def kill_browser_processes(self):

@@ -18,7 +18,7 @@ class XCaptureAction(BaseAction):
 
     # 使用默认阈值
     pcap_lowest_size = 100000
-    ssl_key_lowest_size = 1000
+    ssl_key_lowest_size = 128
 
 
 if __name__ == "__main__":
