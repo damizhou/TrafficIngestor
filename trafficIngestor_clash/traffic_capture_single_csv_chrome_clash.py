@@ -7,6 +7,7 @@ Read URLs from CSV and capture traffic with a container pool.
 Each container is assigned a dedicated Clash node.
 """
 
+from datetime import datetime
 import os
 import sys
 from typing import Dict, List
@@ -18,10 +19,12 @@ if _project_root not in sys.path:
 
 from trafficIngestor_clash.base_clash_traffic_ingestor import BaseClashTrafficIngestor
 
+BASE_DST_DATE = datetime.now().strftime("%y%m%d")
+
 
 class TrafficIngestor(BaseClashTrafficIngestor):
     CONTAINER_COUNT = 15 * 10
-    BASE_DST = "/netdisk2/ww/trojan/top2000/homepage_only/260330/chrome"
+    BASE_DST = f"/netdisk2/ww/trojan/top2000/homepage_only/{BASE_DST_DATE}/chrome"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False

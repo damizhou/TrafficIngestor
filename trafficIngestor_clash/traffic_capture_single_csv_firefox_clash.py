@@ -6,6 +6,7 @@ traffic_capture_single_csv_firefox_clash.py
 Read URLs from CSV and capture traffic with Firefox containers routed through Clash.
 """
 
+from datetime import datetime
 import os
 import sys
 from typing import Dict, List
@@ -17,10 +18,12 @@ if _project_root not in sys.path:
 
 from trafficIngestor_clash.base_clash_traffic_ingestor import BaseClashTrafficIngestor
 
+BASE_DST_DATE = datetime.now().strftime("%y%m%d")
+
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    CONTAINER_COUNT = 15 * 10
-    BASE_DST = "/netdisk2/ww/trojan/top2000/homepage_only/260330/firefox"
+    CONTAINER_COUNT = 150
+    BASE_DST = f"/netdisk2/ww/trojan/top2000/homepage_only/{BASE_DST_DATE}/firefox"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"
     RETRY = 5
     CSV_PATH = os.path.join(_project_root, "small_tools", "result", "homeonly_merged_firefox.csv")
