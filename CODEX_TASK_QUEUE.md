@@ -66,3 +66,4 @@
 - [x] Completed and verified: add error-focused Clash Chrome diagnostics by logging richer browser failure summaries and Clash runtime log tails without adding extra success-path process logs; verified with `python -m py_compile tools\\base_action.py tools\\chrome.py traffic_capture_single_csv_clash\\action.py trafficIngestor_clash\\traffic_capture_single_csv_clash.py` - 2026-04-02 11:12
 - [x] 已完成并验证：排查 `traffic_capture_single_csv_clash/logs/20260402_pcz_traffic_capture_single_csv_clash0.log` 与残留 `pcap/clash_runtime`，确认故障发生在 `la01.zlfbgac.site:443` 的 Trojan 外层 TLS 握手阶段，非本地 Clash 监听或 Chrome 代理注入问题 - 2026-04-02 12:21
 - [-] 将 Clash BASE_DST 日期目录改为运行时自动生成（中，0.25h）
+- [x] 已完成并验证：同步 README 中固定 IP / Clash 网段约定，并补充 Docker 网络排查命令 - 2026-04-08 10:50

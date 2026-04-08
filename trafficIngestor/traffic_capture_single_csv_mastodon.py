@@ -8,6 +8,7 @@ x_traffic.py
 
 import os
 import sys
+from datetime import datetime
 from typing import List, Dict
 
 # 添加项目根目录到路径
@@ -17,7 +18,7 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
-
+BASE_DST_DATE = datetime.now().strftime("%y%m%d")
 
 class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
@@ -25,7 +26,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # ============== 配置 ==============
     CONTAINER_COUNT = 15 * 5
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_mastodon')
-    BASE_DST = '/netdisk/lyl/0401/chrome/without_login'
+    BASE_DST = f'/netdisk/lyl/{BASE_DST_DATE}/chrome/without_login'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 

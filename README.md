@@ -61,11 +61,11 @@ id,url,domain
 - `python trafficIngestor/traffic_capture_single_csv.py`
   Chrome 批量流量采集
 - `python trafficIngestor/traffic_capture_single_csv_fixed_ip_europe.py`
-  Chrome 批量流量采集，容器挂到独立网络 `traffic_ingestor_fixed_ip_europe_net`，IP 从 `172.19.10.10` 开始递增
+  Chrome 批量流量采集，容器挂到独立网络 `traffic_ingestor_fixed_ip_europe_net`，IP 从 `172.18.0.2` 开始递增
 - `python trafficIngestor/traffic_capture_single_csv_fixed_ip_rsia.py`
-  Chrome 批量流量采集，容器挂到独立网络 `traffic_ingestor_fixed_ip_rsia_net`，IP 从 `172.19.20.10` 开始递增
+  Chrome 批量流量采集，容器挂到独立网络 `traffic_ingestor_fixed_ip_rsia_net`，IP 从 `172.18.2.2` 开始递增
 - `python trafficIngestor_clash/traffic_capture_single_csv_clash.py`
-  Chrome + Clash 批量流量采集，容器挂到独立网络 `traffic_ingestor_chrome_clash_net`，IP 从 `172.19.60.10` 起始段自动顺延
+  Chrome + Clash 批量流量采集，运行时按入口脚本名自动创建独立 Docker 网络，并从 `172.19.0.0/16` 地址池中选择可用 `/22` 子网
 - `python trafficIngestor/traffic_capture_single_csv_edge.py`
   Edge 测试或定向采集
 - `python trafficIngestor/traffic_capture_single_csv_firefox.py`
@@ -105,9 +105,46 @@ id,url,domain
 - `CONTAINER_IP_START`：可选，按容器序号递增分配固定 IPv4
 - `DELETE_INVALID_FILES_ON_FAIL`：可选，容器内任务失败或校验失败时是否删除失败产物；`traffic_capture_single_csv_clash.py` 可将其设为 `False` 以保留 `pcap/html/ssl_key` 便于排查
 
-固定 IP 入口默认使用各自独立的 Docker 网络；若目标网络不存在，基类会按 `CONTAINER_IP_START`、`DOCKER_NETWORK_SUBNET_PREFIX` 和 `DOCKER_NETWORK_GATEWAY` 自动创建。当前示例入口分别使用 `traffic_ingestor_fixed_ip_europe_net`(`172.19.10.0/24`)、`traffic_ingestor_fixed_ip_rsia_net`(`172.19.20.0/24`) 等网络；这样可以避免与历史共享网段 `172.18.0.0/16` 重叠，并减少多个大容器池复用同一 bridge 时触发 `exchange full`。
+固定 IP 入口默认使用各自独立的 Docker 网络；若目标网络不存在，基类会按 `CONTAINER_IP_START`、`DOCKER_NETWORK_SUBNET_PREFIX` 和 `DOCKER_NETWORK_GATEWAY` 自动创建。当前示例入口分别使用 `traffic_ingestor_fixed_ip_europe_net`(`172.18.0.0/23`) 和 `traffic_ingestor_fixed_ip_rsia_net`(`172.18.2.0/23`)。网段规划约定为：Docker 默认网络保留 `172.17.0.0/16`；需要手动固定 IP 的采集器统一使用 `172.18.0.0/16`；这样可以在不触碰默认 bridge 的前提下，为特殊任务提供稳定容器地址，并减少多个大容器池复用同一 bridge 时触发 `exchange full`。
 
-`trafficIngestor_clash/` 下的入口额外启用了“运行命名空间”隔离：默认按入口脚本文件名自动推导 `BASE_NAME`、`HOST_CODE_PATH`、`CONTAINER_PREFIX` 和 `DOCKER_NETWORK`。基类不会创建 `172.19.0.0/16` 这个大网段，而是把它当作地址池，按顺序扫描可用的 `/22` 子网并依次使用 `172.19.0.0/22`、`172.19.4.0/22`、`172.19.8.0/22`……；新建的自动子网默认使用 `.1` 作为网关、`.2` 作为首个容器 IP。这样各个 clash 入口脚本本身不再显式配置网络和 IP，只保留任务规模、镜像、CSV 路径等业务参数。若需要显式指定命名空间，可设置环境变量 `TRAFFIC_INGESTOR_RUN_NAME`。
+`trafficIngestor_clash/` 下的入口额外启用了“运行命名空间”隔离：默认按入口脚本文件名自动推导 `BASE_NAME`、`HOST_CODE_PATH`、`CONTAINER_PREFIX` 和 `DOCKER_NETWORK`。基类不会创建整个 `172.19.0.0/16`，而是把它当作地址池，按顺序扫描可用的 `/22` 子网并依次使用 `172.19.0.0/22`、`172.19.4.0/22`、`172.19.8.0/22`……；新建的自动子网默认使用 `.1` 作为网关、`.2` 作为首个容器 IP。建议在宿主机代理或 `v2raya` 配置中将 `172.19.0.0/16` 整段设为直连，避免 Clash 容器流量再次进入宿主机透明代理。这样各个 Clash 入口脚本本身不再显式配置网络和 IP，只保留任务规模、镜像、CSV 路径等业务参数。若需要显式指定命名空间，可设置环境变量 `TRAFFIC_INGESTOR_RUN_NAME`。
+
+### Docker 网络排查
+需要核对宿主机上的 Docker 网段时，可先执行：
+
+```powershell
+docker network ls
+docker network inspect bridge --format '{{json .IPAM.Config}}'
+docker network inspect traffic_ingestor_fixed_ip_europe_net --format '{{json .IPAM.Config}}'
+docker network inspect traffic_ingestor_fixed_ip_rsia_net --format '{{json .IPAM.Config}}'
+docker network ls --format '{{.Name}}' | ForEach-Object {
+    docker network inspect $_ --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}} gw={{.Gateway}}{{end}}'
+}
+docker network ls --format '{{.Name}}' | Select-String 'traffic_ingestor_clash'
+```
+
+若要进一步查看网络里已挂载的容器及其固定 IP，可执行：
+
+```powershell
+docker network inspect traffic_ingestor_fixed_ip_europe_net
+docker network inspect traffic_ingestor_fixed_ip_rsia_net
+```
+
+如果宿主机使用的是 bash，可改用：
+
+```bash
+docker network ls
+docker network inspect bridge --format '{{json .IPAM.Config}}'
+docker network inspect traffic_ingestor_fixed_ip_europe_net --format '{{json .IPAM.Config}}'
+docker network inspect traffic_ingestor_fixed_ip_rsia_net --format '{{json .IPAM.Config}}'
+docker network ls --format '{{.Name}}' | while read -r n; do
+    docker network inspect "$n" --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}} gw={{.Gateway}}{{end}}'
+done
+docker network ls --format '{{.Name}}' | grep '^traffic_ingestor_clash'
+docker network ls --format '{{.Name}}' | grep '^traffic_ingestor_clash' | while read -r n; do
+    docker network inspect "$n" --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}} gw={{.Gateway}}{{end}} attached={{len .Containers}}'
+done
+```
 
 ### 数据库采集任务
 数据库模式使用 `db/db_config.ini`。需要提供 `mysql` 配置节，并包含：

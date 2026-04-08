@@ -29,9 +29,9 @@ class TrafficIngestor(BaseTrafficIngestor):
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
-    DOCKER_NETWORK_SUBNET_PREFIX = 24
-    DOCKER_NETWORK_GATEWAY = "172.20.10.1"
-    CONTAINER_IP_START = "172.20.10.10"
+    DOCKER_NETWORK_SUBNET_PREFIX = 23
+    DOCKER_NETWORK_GATEWAY = "172.18.0.1"
+    CONTAINER_IP_START = "172.18.0.2"
 
     # CSV 必须包含表头，字段名（大小写不敏感）：
     # - id: 唯一标识，用于任务完成/失败后从 CSV 删除对应行
