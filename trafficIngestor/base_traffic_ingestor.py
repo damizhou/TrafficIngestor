@@ -1000,7 +1000,7 @@ class BaseTrafficIngestor(ABC):
 
         return jobs, header_fields
 
-    def remove_from_csv(self, csv_path: str, row_id: str) -> None:
+    def _legacy_remove_from_csv_unused(self, csv_path: str, row_id: str) -> None:
         """从 CSV 中删除指定记录（原子操作，一次只删除一条）"""
         target_id = str(row_id).strip()
         if not target_id:
@@ -1115,27 +1115,13 @@ class BaseTrafficIngestor(ABC):
                     os.chown(tmp_path, original_stat.st_uid, original_stat.st_gid)
                 os.replace(tmp_path, csv_path)
                 match_desc = ", ".join(f"{key}={value}" for key, value in normalized_fields)
-                self.log(
-                    f"Removed first matching CSV row: {match_desc}; "
-                    f"remaining={len(remaining_rows)}"
-                )
+                self.log(f"已从 CSV 删除记录 row={match_desc}，剩余 {len(remaining_rows)} 条")
             except Exception:
                 try:
                     os.unlink(tmp_path)
                 except OSError:
                     pass
                 raise
-
-    def remove_task_from_csv(self, csv_path: str, task: Dict[str, str]) -> None:
-        """Remove the first CSV row matching the common task identity fields."""
-        self.remove_first_matching_row_from_csv(
-            csv_path,
-            {
-                "id": task.get("row_id", ""),
-                "url": task.get("url", ""),
-                "domain": task.get("domain", ""),
-            },
-        )
 
     def _wait_before_first_exec(self, container: str) -> None:
         """仅在每个容器第一次执行 docker exec 前做全局节流。"""
