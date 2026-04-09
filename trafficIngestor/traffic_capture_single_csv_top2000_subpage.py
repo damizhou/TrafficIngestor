@@ -61,14 +61,6 @@ class TrafficIngestor(BaseTrafficIngestor):
             except Exception as e:
                 self.log(f"ERROR: 删除 CSV 记录失败: {e}")
 
-    def on_task_failed(self, task: Dict[str, str], error: str) -> None:
-        """任务失败后也从 CSV 删除记录（避免重复处理）"""
-        row_id = task.get("row_id", "")
-        if row_id:
-            try:
-                self.remove_task_from_csv(self.CSV_PATH, task)
-            except Exception as e:
-                self.log(f"ERROR: 删除 CSV 记录失败: {e}")
 
     def should_continue(self) -> bool:
         """只运行一次"""

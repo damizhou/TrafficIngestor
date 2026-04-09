@@ -49,9 +49,6 @@ class TrafficIngestor(BaseClashTrafficIngestor):
             except Exception as e:
                 self.log(f"ERROR: 删除 CSV 记录失败: {e}")
 
-    def on_task_failed(self, task: Dict[str, str], error: str) -> None:
-        pass
-
     def should_continue(self) -> bool:
         return False
 
