@@ -23,12 +23,12 @@ BASE_DST_DATE = datetime.now().strftime("%y%m%d")
 
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    CONTAINER_COUNT = 15 * 10
+    CONTAINER_COUNT = 15 * 5
     BASE_DST = f"/netdisk2/ww/trojan/top2000/homepage_only/{BASE_DST_DATE}/chrome"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False
-    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "homeonly_merged_chrome.csv")
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "homeonly_merged_chrome_trojan.csv")
 
     def __init__(self):
         super().__init__()
@@ -50,9 +50,6 @@ class TrafficIngestor(BaseClashTrafficIngestor):
                 self.remove_from_csv(self.CSV_PATH, row_id)
             except Exception as e:
                 self.log(f"ERROR: 删除 CSV 记录失败: {e}")
-
-    def on_task_failed(self, task: Dict[str, str], error: str) -> None:
-        pass
 
     def should_continue(self) -> bool:
         return False

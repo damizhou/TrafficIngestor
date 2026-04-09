@@ -57,7 +57,7 @@ class TrafficIngestor(BaseTrafficIngestor):
         row_id = task.get("row_id", "")
         if row_id:
             try:
-                self.remove_from_csv(self.CSV_PATH, row_id)
+                self.remove_task_from_csv(self.CSV_PATH, task)
             except Exception as e:
                 self.log(f"ERROR: 删除 CSV 记录失败: {e}")
 
@@ -66,7 +66,7 @@ class TrafficIngestor(BaseTrafficIngestor):
         row_id = task.get("row_id", "")
         if row_id:
             try:
-                self.remove_from_csv(self.CSV_PATH, row_id)
+                self.remove_task_from_csv(self.CSV_PATH, task)
             except Exception as e:
                 self.log(f"ERROR: 删除 CSV 记录失败: {e}")
 

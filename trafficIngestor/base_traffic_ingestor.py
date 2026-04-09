@@ -1055,6 +1055,88 @@ class BaseTrafficIngestor(ABC):
                     pass
                 raise
 
+    def remove_first_matching_row_from_csv(
+        self,
+        csv_path: str,
+        match_fields: Dict[str, str],
+    ) -> None:
+        """Remove the first CSV row whose selected fields all match."""
+        normalized_fields = [
+            (str(key).strip().lower(), (value or "").strip())
+            for key, value in match_fields.items()
+            if str(key).strip()
+        ]
+        if not normalized_fields:
+            return
+
+        with self._csv_lock:
+            p = Path(csv_path)
+            if not p.exists():
+                return
+            original_stat = p.stat()
+
+            with p.open("r", encoding="utf-8-sig", newline="") as f:
+                reader = csv.DictReader(f)
+                if reader.fieldnames is None:
+                    return
+                header_fields = list(reader.fieldnames)
+                rows = list(reader)
+
+            def row_matches(row: Dict[str, str]) -> bool:
+                for expected_key, expected_value in normalized_fields:
+                    actual_value = ""
+                    for actual_key, actual_raw_value in row.items():
+                        if isinstance(actual_key, str) and actual_key.lower() == expected_key:
+                            actual_value = (actual_raw_value or "").strip()
+                            break
+                    if actual_value != expected_value:
+                        return False
+                return True
+
+            remaining_rows = []
+            removed = False
+            for row in rows:
+                if not removed and row_matches(row):
+                    removed = True
+                else:
+                    remaining_rows.append(row)
+
+            if not removed:
+                return
+
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=p.parent, suffix=".tmp", prefix=".csv_")
+            try:
+                with os.fdopen(tmp_fd, "w", encoding="utf-8-sig", newline="") as f:
+                    writer = csv.DictWriter(f, fieldnames=header_fields, extrasaction="ignore")
+                    writer.writeheader()
+                    writer.writerows(remaining_rows)
+                os.chmod(tmp_path, stat.S_IMODE(original_stat.st_mode))
+                if hasattr(os, "chown"):
+                    os.chown(tmp_path, original_stat.st_uid, original_stat.st_gid)
+                os.replace(tmp_path, csv_path)
+                match_desc = ", ".join(f"{key}={value}" for key, value in normalized_fields)
+                self.log(
+                    f"Removed first matching CSV row: {match_desc}; "
+                    f"remaining={len(remaining_rows)}"
+                )
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+
+    def remove_task_from_csv(self, csv_path: str, task: Dict[str, str]) -> None:
+        """Remove the first CSV row matching the common task identity fields."""
+        self.remove_first_matching_row_from_csv(
+            csv_path,
+            {
+                "id": task.get("row_id", ""),
+                "url": task.get("url", ""),
+                "domain": task.get("domain", ""),
+            },
+        )
+
     def _wait_before_first_exec(self, container: str) -> None:
         """仅在每个容器第一次执行 docker exec 前做全局节流。"""
         interval = max(float(self.FIRST_EXEC_INTERVAL), 0.0)

@@ -8,6 +8,7 @@ x_traffic.py
 
 import os
 import sys
+from datetime import datetime
 from typing import List, Dict
 
 # 添加项目根目录到路径
@@ -18,14 +19,14 @@ if _project_root not in sys.path:
 
 from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
 
-
+BASE_DST_DATE = datetime.now().strftime("%y%m%d")
 class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
 
     # ============== 配置 ==============
     CONTAINER_COUNT = 15 * 5
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv')
-    BASE_DST = '/netdisk2/ww/wiki/0325/chrome'
+    BASE_DST = f'/netdisk2/ww/top2000/homepage_only/{BASE_DST_DATE}/chrome/us'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 
@@ -36,7 +37,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # 示例：
     # id,url,domain
     # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'wiki_chrome.csv')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'homeonly_merged_chrome.csv')
 
     def __init__(self):
         super().__init__()
@@ -54,10 +55,10 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     def on_task_success(self, task: Dict[str, str], paths: Dict[str, str]) -> None:
         """任务成功后从 CSV 删除记录"""
-        row_id = task.get("row_id", "")
-        if row_id:
+        match_url = task.get("url", "")
+        if match_url:
             try:
-                self.remove_from_csv(self.CSV_PATH, row_id)
+                self.remove_task_from_csv(self.CSV_PATH, task)
             except Exception as e:
                 self.log(f"ERROR: 删除 CSV 记录失败: {e}")
 
@@ -66,7 +67,7 @@ class TrafficIngestor(BaseTrafficIngestor):
         # row_id = task.get("row_id", "")
         # if row_id:
         #     try:
-        #         self.remove_from_csv(self.CSV_PATH, row_id)
+        #         self.remove_task_from_csv(self.CSV_PATH, task)
         #     except Exception as e:
         #         self.log(f"ERROR: 删除 CSV 记录失败: {e}")
 
