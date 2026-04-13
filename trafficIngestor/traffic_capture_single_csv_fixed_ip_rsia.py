@@ -28,7 +28,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     CODE_DIR_NAME = 'traffic_capture_single_csv'
     CONTAINER_COUNT = 15 * 5
     HOST_CODE_PATH = os.path.join(_project_root, CODE_DIR_NAME)
-    BASE_DST = f'/netdisk2/ww/top2000/homepage_only/{BASE_DST_DATE}/chrome/sgp'
+    BASE_DST = f'/netdisk2/ww/top2000/homepage_only/260409/chrome/sgp'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK

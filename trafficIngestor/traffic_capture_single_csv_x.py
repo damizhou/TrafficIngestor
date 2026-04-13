@@ -18,8 +18,8 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
-BASE_DST_DATE = datetime.now().strftime("%y%m%d")
-
+# BASE_DST_DATE = datetime.now().strftime("%y%m%d")
+BASE_DST_DATE =260408
 class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
 

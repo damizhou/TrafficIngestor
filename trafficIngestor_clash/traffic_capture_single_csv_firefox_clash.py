@@ -10,6 +10,7 @@ from datetime import datetime
 import os
 import sys
 from typing import Dict, List
+import time
 
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_current_dir)
@@ -23,10 +24,10 @@ BASE_DST_DATE = datetime.now().strftime("%y%m%d")
 
 class TrafficIngestor(BaseClashTrafficIngestor):
     CONTAINER_COUNT = 150
-    BASE_DST = f"/netdisk2/ww/trojan/top2000/homepage_only/{BASE_DST_DATE}/firefox"
+    BASE_DST = f"/netdisk2/ww/trojan/wiki/260413/firefox"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"
     RETRY = 5
-    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "homeonly_merged_firefox.csv")
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_firefox.csv")
 
     def __init__(self):
         super().__init__()
@@ -67,8 +68,6 @@ class TrafficIngestor(BaseClashTrafficIngestor):
 
 
 if __name__ == "__main__":
-    TrafficIngestor.main()
-    TrafficIngestor.main()
-    TrafficIngestor.main()
-    TrafficIngestor.main()
-    TrafficIngestor.main()
+    for i in range(5):
+        TrafficIngestor.main()
+        time.sleep(3600)

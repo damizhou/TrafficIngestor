@@ -6,3 +6,4 @@ small_tools/origin
 *__pycache__*
 temp/
 config/
+.vscode/

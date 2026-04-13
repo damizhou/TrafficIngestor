@@ -21,8 +21,8 @@ from typing import Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
 
-DEFAULT_INPUT_CSV = "top2000_ingestor.csv"
-DEFAULT_CHECK_DIR = "/netdisk/ww/top200000"
+DEFAULT_INPUT_CSV = r"../result/top300000_ingestor_temp.csv"
+DEFAULT_CHECK_DIR = "/netdisk2/ww/trojan/top200000/260402/chrome/"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent

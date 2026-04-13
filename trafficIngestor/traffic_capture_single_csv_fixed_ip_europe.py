@@ -26,7 +26,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # ============== 配置 ==============
     SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_europe_net"
     CONTAINER_COUNT = 15 * 5
-    BASE_DST = f'/netdisk2/ww/top2000/homepage_only/{BASE_DST_DATE}/chrome/fra'
+    BASE_DST = f'/netdisk2/ww/top2000/homepage_only/260409/chrome/fra'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
