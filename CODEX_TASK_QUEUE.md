@@ -67,3 +67,18 @@
 - [x] 已完成并验证：排查 `traffic_capture_single_csv_clash/logs/20260402_pcz_traffic_capture_single_csv_clash0.log` 与残留 `pcap/clash_runtime`，确认故障发生在 `la01.zlfbgac.site:443` 的 Trojan 外层 TLS 握手阶段，非本地 Clash 监听或 Chrome 代理注入问题 - 2026-04-02 12:21
 - [-] 将 Clash BASE_DST 日期目录改为运行时自动生成（中，0.25h）
 - [x] 已完成并验证：同步 README 中固定 IP / Clash 网段约定，并补充 Docker 网络排查命令 - 2026-04-08 10:50
+ 
+- [x] Completed and verified: Ensure Clash CSV task output includes moved pcap path - 2026-04-17 14:49
+- [x] 已完成并验证：整理 `trafficIngestor/traffic_capture_single_csv.py` 代码流程说明并写入 `temp/traffic_capture_single_csv_flow.md` - 2026-04-22 19:55
+- [x] 已完成并验证：将 `temp/traffic_capture_single_csv_flow.md` 优化为“代码流程 + 学术信息图映射”版本，结合旧 benchmark 与 SiteBench / TeraWFD 重估叙事 - 2026-04-22 20:05
+- [x] 已完成并验证：按 Figure 4 系统架构图要求重写 `temp/traffic_capture_single_csv_flow.md`，突出 `per-visit alignment` 与 `multimodal evidence` - 2026-04-22 20:59
+- [x] 已完成并验证：将 `temp/traffic_capture_single_csv_flow.md` 重写为弱化细节、突出流程的约 800 字代码说明版本 - 2026-04-22 21:06
+
+- [x] 已完成并验证：将 Figure 3 简化为“任务加载、环境初始化、流量采集、数据清洗与校验、数据存储”五阶段说明并写入章节文档 - 2026-04-24 00:00
+- [x] 已完成并验证：分析 `news_receiver_traffic_batch.py` 批量采集实现并将 Figure 4 改图建议写入 `document/fig4_news_receiver_batch_design.md` - 2026-04-24 21:30
+- [x] 已完成并验证：将 Figure 4 设计说明调整为 `traffic_capture_single_csv.py` 连续访问版本，补充 HTML、截图、正文文本与 PCAP/keylog 对齐的多模态证据链 - 2026-04-24 21:40
+- [x] 已完成并验证：在 `document/fig4_news_receiver_batch_design.md` 中补充 Figure 3 五阶段系统管道设计，并整理 Figure 3 / Figure 4 分工 - 2026-04-24 21:45
+- [x] 已完成并验证：检查并修正 `document/Figure 3 与 Figure 4 结构图设计建议.md` 中将 metadata/访问元信息误写为数据产物的问题，统一为 PCAP、TLS key、HTML、screenshot、text 五类数据口径 - 2026-04-24 22:00
+- [x] 已完成并验证：新增 Figure 3/4 合并图绘图思路文档 - 2026-04-28 10:54
+- [x] 已完成并验证：修复 CSV URL 含未转义逗号时任务读取错位 - 2026-05-09 09:03
+- [x] 已完成并验证：进度日志增加总任务数量 - 2026-05-11 09:43

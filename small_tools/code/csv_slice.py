@@ -16,10 +16,10 @@ import csv
 from pathlib import Path
 
 # Hardcoded config
-INPUT_CSV = "tranco_ZWZ5G.csv"
-START_LINE = 300001
-END_LINE = 330001
-OUTPUT_CSV = "top330000_ingestor.csv"
+INPUT_CSV = "../origin/tranco_ZWZ5G.csv"
+START_LINE = 330001
+END_LINE = 530001
+OUTPUT_CSV = "../result/top200000_ingestor_subpage.csv"
 DEFAULT_SCHEME = "https://"
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -101,7 +101,7 @@ def main() -> None:
                 skipped += 1
                 continue
 
-            writer.writerow([row_id, url, domain])
+            writer.writerow(["1", url, domain])
             converted += 1
 
     if total_lines == 0:

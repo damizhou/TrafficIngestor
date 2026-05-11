@@ -82,6 +82,7 @@ class BaseTrafficIngestor(ABC):
         self.configure_runtime_identity()
         self._stats_lock = threading.Lock()
         self._csv_lock = threading.Lock()
+        self._task_success_context = threading.local()
         self._pbar = None
         self._first_exec_lock = threading.Lock()
         self._first_exec_next_ts = 0.0
@@ -92,6 +93,7 @@ class BaseTrafficIngestor(ABC):
         self._global_start_time = 0.0
         self._global_ok = 0
         self._global_fail = 0
+        self._global_total_jobs = 0
         self._global_container_count = max(int(self.CONTAINER_COUNT), 1)
 
     # ============== 日志 ==============
@@ -970,33 +972,92 @@ class BaseTrafficIngestor(ABC):
         return new_path
 
     # ============== CSV 操作 ==============
+    @staticmethod
+    def _get_csv_field_index(header_fields: List[str], field_name: str) -> Optional[int]:
+        target = field_name.strip().lower()
+        for index, header in enumerate(header_fields):
+            if str(header).strip().lower() == target:
+                return index
+        return None
+
+    def _repair_csv_row_values(self, header_fields: List[str], row_values: List[str]) -> List[str]:
+        """Repair common unquoted commas inside the URL field.
+
+        Some input files contain rows like:
+        id,https://example/wiki/3,3-title,example.com
+        for a 3-column id,url,domain CSV. The stdlib csv reader must split this
+        into four values because the URL field is not quoted. Treat surplus
+        values as part of the URL and keep the last logical fields aligned.
+        """
+        header_count = len(header_fields)
+        values = ["" if value is None else str(value) for value in row_values]
+        if len(values) <= header_count:
+            return values + [""] * max(header_count - len(values), 0)
+
+        url_index = self._get_csv_field_index(header_fields, "url")
+        if url_index is None:
+            return values[:header_count - 1] + [",".join(values[header_count - 1:])]
+
+        extra_count = len(values) - header_count
+        repaired: List[str] = []
+        source_index = 0
+        for header_index in range(header_count):
+            if header_index == url_index:
+                url_end = source_index + extra_count + 1
+                repaired.append(",".join(values[source_index:url_end]))
+                source_index = url_end
+                continue
+            repaired.append(values[source_index] if source_index < len(values) else "")
+            source_index += 1
+        return repaired
+
+    def _csv_row_to_dict(self, header_fields: List[str], row_values: List[str]) -> Dict[str, str]:
+        repaired_values = self._repair_csv_row_values(header_fields, row_values)
+        return {
+            header_fields[index]: (repaired_values[index] if index < len(repaired_values) else "")
+            for index in range(len(header_fields))
+        }
+
+    def _read_csv_records(self, p: Path) -> Tuple[List[str], List[Dict[str, str]]]:
+        with p.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.reader(f)
+            try:
+                raw_header = next(reader)
+            except StopIteration:
+                return [], []
+
+            header_fields = [str(h).strip() for h in raw_header]
+            rows = [
+                self._csv_row_to_dict(header_fields, row)
+                for row in reader
+                if row
+            ]
+        return header_fields, rows
+
     def read_jobs_from_csv(self, csv_path: str) -> Tuple[List[Dict[str, str]], List[str]]:
         """从 CSV 读取任务"""
         p = Path(csv_path)
         if not p.exists():
             return [], ["id", "url", "domain"]
 
-        with p.open("r", encoding="utf-8-sig", newline="") as f:
-            reader = csv.DictReader(f)
-            if reader.fieldnames is None:
-                return [], ["id", "url", "domain"]
+        header_fields, rows = self._read_csv_records(p)
+        if not header_fields:
+            return [], ["id", "url", "domain"]
 
-            header_fields = [h.strip() for h in reader.fieldnames]
+        def get_case_insensitive(row: Dict[str, str], key: str) -> str:
+            for k, v in row.items():
+                if isinstance(k, str) and k.lower() == key:
+                    return (v or "").strip()
+            return ""
 
-            def get_case_insensitive(row: Dict[str, str], key: str) -> str:
-                for k, v in row.items():
-                    if isinstance(k, str) and k.lower() == key:
-                        return (v or "").strip()
-                return ""
-
-            jobs: List[Dict[str, str]] = []
-            for r in reader:
-                rid = get_case_insensitive(r, "id")
-                url = get_case_insensitive(r, "url")
-                dom = get_case_insensitive(r, "domain")
-                if not url:
-                    continue
-                jobs.append({"row_id": rid, "url": url, "domain": dom})
+        jobs: List[Dict[str, str]] = []
+        for r in rows:
+            rid = get_case_insensitive(r, "id")
+            url = get_case_insensitive(r, "url")
+            dom = get_case_insensitive(r, "domain")
+            if not url:
+                continue
+            jobs.append({"row_id": rid, "url": url, "domain": dom})
 
         return jobs, header_fields
 
@@ -1012,12 +1073,9 @@ class BaseTrafficIngestor(ABC):
                 return
             original_stat = p.stat()
 
-            with p.open("r", encoding="utf-8-sig", newline="") as f:
-                reader = csv.DictReader(f)
-                if reader.fieldnames is None:
-                    return
-                header_fields = list(reader.fieldnames)
-                rows = list(reader)
+            header_fields, rows = self._read_csv_records(p)
+            if not header_fields:
+                return
 
             def get_id(row: Dict[str, str]) -> str:
                 for k, v in row.items():
@@ -1075,12 +1133,9 @@ class BaseTrafficIngestor(ABC):
                 return
             original_stat = p.stat()
 
-            with p.open("r", encoding="utf-8-sig", newline="") as f:
-                reader = csv.DictReader(f)
-                if reader.fieldnames is None:
-                    return
-                header_fields = list(reader.fieldnames)
-                rows = list(reader)
+            header_fields, rows = self._read_csv_records(p)
+            if not header_fields:
+                return
 
             def row_matches(row: Dict[str, str]) -> bool:
                 for expected_key, expected_value in normalized_fields:
@@ -1115,13 +1170,29 @@ class BaseTrafficIngestor(ABC):
                     os.chown(tmp_path, original_stat.st_uid, original_stat.st_gid)
                 os.replace(tmp_path, csv_path)
                 match_desc = ", ".join(f"{key}={value}" for key, value in normalized_fields)
-                self.log(f"已从 CSV 删除记录 row={match_desc}，剩余 {len(remaining_rows)} 条")
+                self.log(
+                    f"已从 CSV 删除记录 row={match_desc}，剩余 {len(remaining_rows)} 条"
+                    f"{self.build_success_csv_remove_log_suffix()}"
+                )
             except Exception:
                 try:
                     os.unlink(tmp_path)
                 except OSError:
                     pass
                 raise
+
+    def get_current_success_paths(self) -> Dict[str, str]:
+        """Return paths for the task currently inside on_task_success()."""
+        context = getattr(self, "_task_success_context", None)
+        if context is None:
+            return {}
+        paths = getattr(context, "paths", None)
+        return paths if isinstance(paths, dict) else {}
+
+    def build_success_csv_remove_log_suffix(self) -> str:
+        """Append moved pcap path to CSV deletion logs after successful captures."""
+        pcap_path = str(self.get_current_success_paths().get("pcap", "")).strip()
+        return f"，pcap保存到{pcap_path}" if pcap_path else ""
 
     def _wait_before_first_exec(self, container: str) -> None:
         """仅在每个容器第一次执行 docker exec 前做全局节流。"""
@@ -1155,10 +1226,13 @@ class BaseTrafficIngestor(ABC):
             per_min = total_done / elapsed_min if elapsed_min > 0 else 0
             # 平均耗时按并发容器折算：运行时长 * 容器总数 / 完成任务数
             avg_time = (elapsed * self._global_container_count / total_done) if total_done > 0 else 0
+            total_jobs = self._global_total_jobs or total_done
+            remaining = max(total_jobs - total_done, 0)
 
             if self._pbar is not None:
                 self._pbar.set_description(
-                    f"任务进度: {total_done}个 [运行: {elapsed_min:.1f}分钟 | 成功: {self._global_ok} | 失败: {self._global_fail} | "
+                    f"任务进度: {total_done}/{total_jobs}个 [剩余: {remaining} | 运行: {elapsed_min:.1f}分钟 | "
+                    f"成功: {self._global_ok} | 失败: {self._global_fail} | "
                     f"每分钟: {per_min:.2f} | 平均耗时: {avg_time:.1f}秒]"
                 )
                 self._pbar.update(1)
@@ -1245,7 +1319,11 @@ class BaseTrafficIngestor(ABC):
             'current_url': current_url
         }
         success_paths.update(extra_saved_paths)
-        self.on_task_success(task, success_paths)
+        self._task_success_context.paths = success_paths
+        try:
+            self.on_task_success(task, success_paths)
+        finally:
+            self._task_success_context.paths = {}
 
         return True, ""
 
@@ -1394,6 +1472,7 @@ class BaseTrafficIngestor(ABC):
         self._global_start_time = time.time()
         self._global_ok = 0
         self._global_fail = 0
+        self._global_total_jobs = 0
         self._runtime_prepared = False
         batch_num = 0
 
@@ -1409,6 +1488,16 @@ class BaseTrafficIngestor(ABC):
                 if not jobs:
                     self.log("没有可处理的任务，退出。")
                     break
+
+                with self._stats_lock:
+                    total_done = self._global_ok + self._global_fail
+                    self._global_total_jobs = total_done + len(jobs)
+                    remaining = max(self._global_total_jobs - total_done, 0)
+                    if self._pbar is not None:
+                        self._pbar.set_description(
+                            f"任务进度: {total_done}/{self._global_total_jobs}个 "
+                            f"[剩余: {remaining} | 初始化中...]"
+                        )
 
                 if not self._runtime_prepared:
                     self.remove_containers()
@@ -1449,9 +1538,12 @@ class BaseTrafficIngestor(ABC):
         elapsed = time.time() - self._global_start_time
         elapsed_min = elapsed / 60.0
         total_done = self._global_ok + self._global_fail
+        total_jobs = self._global_total_jobs or total_done
+        remaining = max(total_jobs - total_done, 0)
         per_min = total_done / elapsed_min if elapsed_min > 0 else 0
         avg_time = (elapsed * self._global_container_count / total_done) if total_done > 0 else 0
-        self.log(f"[最终汇总] 批次={batch_num} | 运行时间={elapsed_min:.1f}分钟 | 总数={total_done} | "
+        self.log(f"[最终汇总] 批次={batch_num} | 运行时间={elapsed_min:.1f}分钟 | 总数={total_jobs} | "
+                 f"完成={total_done} | 剩余={remaining} | "
                  f"成功={self._global_ok} | 失败={self._global_fail} | 每分钟={per_min:.2f} | 平均耗时={avg_time:.1f}秒")
 
     def setup(self) -> None:

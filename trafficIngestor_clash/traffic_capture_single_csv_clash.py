@@ -24,12 +24,12 @@ BASE_DST_DATE = datetime.now().strftime("%y%m%d")
 
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    CONTAINER_COUNT = 15 * 20
-    BASE_DST = f"/netdisk2/ww/trojan/top200000/260402/chrome"
+    CONTAINER_COUNT = 15 * 40
+    BASE_DST = f"/netdisk2/ww/trojan/wiki_white_20w/260508"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False
-    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "top300000_ingestor_temp.csv")
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_white.csv")
     #
     # CSV_PATH = os.path.join(_project_root, "small_tools", "result", "test.csv")
     def __init__(self):
@@ -64,8 +64,6 @@ class TrafficIngestor(BaseClashTrafficIngestor):
         return False
 
     def cleanup(self) -> None:
-        import time
-
         time.sleep(60)
         self.remove_containers()
 

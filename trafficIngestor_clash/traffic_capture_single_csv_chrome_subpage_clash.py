@@ -10,6 +10,7 @@ Each container is assigned a dedicated Clash node.
 import os
 import sys
 from typing import Dict, List
+import time
 
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_current_dir)
@@ -20,7 +21,7 @@ from trafficIngestor_clash.base_clash_traffic_ingestor import BaseClashTrafficIn
 
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    CONTAINER_COUNT = 15 * 10
+    CONTAINER_COUNT = 15 * 30
     BASE_DST = "/netdisk2/ww/trojan/top2000/subpages_merged"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
@@ -59,14 +60,11 @@ class TrafficIngestor(BaseClashTrafficIngestor):
         return False
 
     def cleanup(self) -> None:
-        import time
-
         time.sleep(60)
         self.remove_containers()
 
 
 if __name__ == "__main__":
-    TrafficIngestor.main()
-    TrafficIngestor.main()
-    TrafficIngestor.main()
-    TrafficIngestor.main()
+    for i in range(5):
+        TrafficIngestor.main()
+        time.sleep(3600)
