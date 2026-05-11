@@ -204,6 +204,71 @@ class BaseAction(ABC):
         except Exception as e:
             self.logger.error(f"删除不合格文件失败: {e}")
 
+    @staticmethod
+    def describe_file(path):
+        """Return compact diagnostics for an output file path."""
+        info = {
+            "path": path or "",
+            "exists": False,
+            "size": -1,
+        }
+        if not path:
+            return info
+        try:
+            info["exists"] = os.path.exists(path)
+            if info["exists"]:
+                info["size"] = os.path.getsize(path)
+        except OSError as e:
+            info["error"] = f"{type(e).__name__}: {e}"
+        return info
+
+    def build_path_diagnostics(self, pcap_path, ssl_key_file_path, content_path, html_path, screenshot_path):
+        """Describe task output files before optional cleanup removes them."""
+        return {
+            "pcap_path": self.describe_file(pcap_path),
+            "ssl_key_file_path": self.describe_file(ssl_key_file_path),
+            "content_path": self.describe_file(content_path),
+            "html_path": self.describe_file(html_path),
+            "screenshot_path": self.describe_file(screenshot_path),
+        }
+
+    def build_failure_details(self, open_url_error, page_not_found, path_diagnostics):
+        """Build reasons that can be written to meta JSON and surfaced by the host."""
+        reasons = []
+        if page_not_found:
+            reasons.append("page_not_found")
+        if open_url_error:
+            reasons.append(f"open_url_error={open_url_error[:300]}")
+
+        pcap = path_diagnostics["pcap_path"]
+        ssl_key = path_diagnostics["ssl_key_file_path"]
+        content = path_diagnostics["content_path"]
+        html = path_diagnostics["html_path"]
+        screenshot = path_diagnostics["screenshot_path"]
+
+        if not pcap["exists"]:
+            reasons.append("pcap_missing")
+        elif pcap["size"] <= self.pcap_lowest_size:
+            reasons.append(f"pcap_too_small={pcap['size']}<={self.pcap_lowest_size}")
+
+        if not ssl_key["exists"]:
+            reasons.append("ssl_key_missing")
+        elif ssl_key["size"] <= self.ssl_key_lowest_size:
+            reasons.append(f"ssl_key_too_small={ssl_key['size']}<={self.ssl_key_lowest_size}")
+
+        if not content["exists"]:
+            reasons.append("content_missing")
+        if not html["exists"]:
+            reasons.append("html_missing")
+        if not screenshot["exists"]:
+            reasons.append("screenshot_missing")
+
+        return reasons
+
+    def get_current_log_path(self, container):
+        """Return the action log path created by tools.logger.setup_logging()."""
+        return os.path.join(os.getcwd(), "logs", f"{datetime.now().strftime('%Y%m%d')}_{container}.log")
+
     def validate_files(self, pcap_path, ssl_key_file_path, content_path, html_path):
         """
         验证文件是否有效
@@ -368,9 +433,16 @@ class BaseAction(ABC):
 
         # 验证文件
         validation_passed = False
+        path_diagnostics = self.build_path_diagnostics(
+            pcap_path,
+            ssl_key_file_path,
+            content_path,
+            html_path,
+            screenshot_path,
+        )
         if page_not_found:
             self.logger.warning("页面不存在")
-        elif self.validate_files(pcap_path, ssl_key_file_path, content_path, html_path):
+        elif self.validate_files(pcap_path, ssl_key_file_path, content_path, html_path) and path_diagnostics["screenshot_path"]["exists"]:
             self.logger.info("数据文件校验通过")
             validation_passed = True
         else:
@@ -392,9 +464,12 @@ class BaseAction(ABC):
                 "html_path": html_path or "",
                 "row_id": row_id,
                 "screenshot_path": screenshot_path or "",
-                "current_url": current_url or ""
+                "current_url": current_url or "",
+                "success": True,
             }
         else:
+            failure_details = self.build_failure_details(open_url_error, page_not_found, path_diagnostics)
+            failure_reason = "page_not_found" if page_not_found else "file_validation_failed"
             result = {
                 "pcap_path": "",
                 "ssl_key_file_path": "",
@@ -402,23 +477,26 @@ class BaseAction(ABC):
                 "html_path": "",
                 "row_id": row_id,
                 "screenshot_path": "",
-                "current_url": ""
+                "current_url": current_url or "",
+                "success": False,
+                "failure_reason": failure_reason,
+                "failure_details": failure_details,
+                "attempted_paths": {
+                    "pcap_path": pcap_path or "",
+                    "ssl_key_file_path": ssl_key_file_path or "",
+                    "content_path": content_path or "",
+                    "html_path": html_path or "",
+                    "screenshot_path": screenshot_path or "",
+                },
+                "path_diagnostics": path_diagnostics,
+                "open_url_error": open_url_error[:1000] if open_url_error else "",
+                "log_path": self.get_current_log_path(container),
+                "requested_url": url,
             }
             if page_not_found:
                 self.logger.warning(f"页面不存在，任务失败: row_id={row_id}")
             else:
-                reasons = []
-                if open_url_error:
-                    reasons.append(f"open_url_error={open_url_error[:180]}")
-                if not (content_path and os.path.exists(content_path)):
-                    reasons.append("content_missing")
-                if not (html_path and os.path.exists(html_path)):
-                    reasons.append("html_missing")
-                if not (pcap_path and os.path.exists(pcap_path)):
-                    reasons.append("pcap_missing")
-                if not (ssl_key_file_path and os.path.exists(ssl_key_file_path)):
-                    reasons.append("ssl_key_missing")
-                reason_text = f" | {', '.join(reasons)}" if reasons else ""
+                reason_text = f" | {', '.join(failure_details)}" if failure_details else ""
                 self.logger.warning(f"文件校验失败，任务失败: row_id={row_id}{reason_text}")
 
         self.write_result(meta_path, result)

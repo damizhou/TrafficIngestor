@@ -106,6 +106,14 @@ class BaseTrafficIngestor(ABC):
         else:
             print(msg, flush=True)
 
+    @staticmethod
+    def compact_error(error: Any, limit: int = 1600) -> str:
+        """Keep failure logs readable without hiding the useful part."""
+        text = str(error or "")
+        if len(text) <= limit:
+            return text
+        return f"{text[:limit]}...<truncated {len(text) - limit} chars>"
+
     # ============== 命令执行 ==============
     def run_cmd(self, cmd: List[str], timeout: Optional[int] = None) -> subprocess.CompletedProcess:
         """执行命令并返回结果"""
@@ -1264,6 +1272,72 @@ class BaseTrafficIngestor(ABC):
             detail = "stdout/stderr empty"
         return False, f"docker exec rc={cp.returncode}: {detail}"
 
+    def container_path_to_host_path(self, path: str) -> str:
+        """Convert a container /app path to the mounted host path for diagnostics."""
+        if not path:
+            return ""
+        return str(path).replace("/app", self.HOST_CODE_PATH, 1)
+
+    def build_missing_result_paths_error(
+        self,
+        result: Dict[str, Any],
+        meta_path: str,
+        required_fields: List[str],
+    ) -> str:
+        """Build a detailed host-side error when action result paths are incomplete."""
+        missing_fields = [field for field in required_fields if not result.get(field)]
+        parts = [
+            f"result JSON missing required paths: missing={','.join(missing_fields) or 'none'}",
+            f"meta={meta_path}",
+        ]
+
+        failure_reason = str(result.get("failure_reason", "") or "").strip()
+        if failure_reason:
+            parts.append(f"reason={failure_reason}")
+
+        failure_details = result.get("failure_details", [])
+        if isinstance(failure_details, list):
+            detail_text = " | ".join(str(item) for item in failure_details[:8] if item)
+        else:
+            detail_text = str(failure_details or "")
+        if detail_text:
+            parts.append(f"details={detail_text[:800]}")
+
+        log_path = str(result.get("log_path", "") or "").strip()
+        if log_path:
+            parts.append(f"log={self.container_path_to_host_path(log_path)}")
+
+        current_url = str(result.get("current_url", "") or "").strip()
+        if current_url:
+            parts.append(f"current_url={current_url[:300]}")
+
+        attempted_paths = result.get("attempted_paths", {})
+        if not isinstance(attempted_paths, dict):
+            attempted_paths = {}
+        path_diagnostics = result.get("path_diagnostics", {})
+        if not isinstance(path_diagnostics, dict):
+            path_diagnostics = {}
+
+        path_parts = []
+        for field in required_fields:
+            diagnostic = path_diagnostics.get(field, {})
+            if not isinstance(diagnostic, dict):
+                diagnostic = {}
+            raw_path = (
+                diagnostic.get("path")
+                or attempted_paths.get(field)
+                or result.get(field)
+                or ""
+            )
+            path = self.container_path_to_host_path(str(raw_path))
+            exists = diagnostic.get("exists", "unknown")
+            size = diagnostic.get("size", "unknown")
+            path_parts.append(f"{field}=path:{path or '<empty>'},exists:{exists},size:{size}")
+        if path_parts:
+            parts.append("paths=[" + "; ".join(path_parts) + "]")
+
+        return "; ".join(parts)
+
     def process_result(self, task: Dict[str, str], container: str) -> Tuple[bool, str]:
         """处理任务执行结果，子类可覆盖"""
         meta_path = os.path.join(self.HOST_CODE_PATH, "meta", f"{container}_last.json")
@@ -1279,8 +1353,15 @@ class BaseTrafficIngestor(ABC):
         screenshot_path = result.get("screenshot_path")
         current_url = result.get("current_url", "")
 
+        required_fields = [
+            "pcap_path",
+            "ssl_key_file_path",
+            "content_path",
+            "html_path",
+            "screenshot_path",
+        ]
         if not all([pcap_path, ssl_key_file_path, content_path, html_path, screenshot_path]):
-            return False, "result JSON missing required paths"
+            return False, self.build_missing_result_paths_error(result, meta_path, required_fields)
 
         # 转换容器路径为宿主机路径
         pcap_path = pcap_path.replace("/app", self.HOST_CODE_PATH)
@@ -1392,7 +1473,7 @@ class BaseTrafficIngestor(ABC):
                         stats["ok"] += 1
                     self._update_progress(ok=True, task_elapsed=task_elapsed)
                 else:
-                    self.log(f"{container} -> fail  [{row_id}] {err[:200]}")
+                    self.log(f"{container} -> fail  [{row_id}] {self.compact_error(err)}")
                     # 失败后放回队列，让其他容器重试
                     if attempt < retry:
                         task["_retry_count"] = attempt + 1
@@ -1515,7 +1596,10 @@ class BaseTrafficIngestor(ABC):
                 if stats["errors"]:
                     self.log("失败样例：")
                     for task, err in stats["errors"][:10]:
-                        self.log(f" - id={task.get('row_id','')} url={task.get('url','')} err={err[:200]}")
+                        self.log(
+                            f" - id={task.get('row_id','')} url={task.get('url','')} "
+                            f"err={self.compact_error(err, limit=1000)}"
+                        )
 
                 if self.CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH:
                     self.clear_host_code_subdirs()
