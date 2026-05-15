@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import ipaddress
+import importlib
 import re
 import shutil
 import sys
@@ -38,6 +39,7 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
     CLASH_START_TIMEOUT: int = 180
     CLASH_NODE_PLACEHOLDER_NAME: str = "vpnnodename"
     DELETE_INVALID_FILES_ON_FAIL: bool = True
+    VPN_INFO_NAME: str = "vpns_info"
     AUTO_RUNTIME_NAMESPACE: bool = True
     RUNTIME_NAME_ENV: str = "TRAFFIC_INGESTOR_RUN_NAME"
     AUTO_DOCKER_NETWORK_POOL: str = "172.19.0.0/16"
@@ -176,20 +178,28 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
         self.CONTAINER_IP_START = str(start_ip)
         self._runtime_network_prepared = True
 
-    def get_vpn_items(self) -> List[Dict[str, Any]]:
-        from config.sever_info import vpns_info
+    def get_vpn_info_name(self) -> str:
+        """Return the node-list variable name in config/sever_info.py."""
+        return str(getattr(type(self), "VPN_INFO_NAME", "vpns_info") or "vpns_info").strip()
 
-        return vpns_info
+    def get_vpn_items(self) -> List[Dict[str, Any]]:
+        vpn_info_name = self.get_vpn_info_name()
+        sever_info = importlib.import_module("config.sever_info")
+        if not hasattr(sever_info, vpn_info_name):
+            raise RuntimeError(f"config/sever_info.py 中找不到节点数组 {vpn_info_name}")
+
+        return getattr(sever_info, vpn_info_name)
 
     def _load_vpns(self) -> List[Dict[str, Any]]:
+        vpn_info_name = self.get_vpn_info_name()
         raw_vpns = self.get_vpn_items()
         if not isinstance(raw_vpns, list) or not raw_vpns:
-            raise RuntimeError("config/sever_info.py 中的 vpns_info 不能为空")
+            raise RuntimeError(f"config/sever_info.py 中的 {vpn_info_name} 不能为空")
 
         normalized: List[Dict[str, Any]] = []
         for index, item in enumerate(raw_vpns):
             if not isinstance(item, dict):
-                raise RuntimeError(f"vpns_info[{index}] 不是 dict")
+                raise RuntimeError(f"{vpn_info_name}[{index}] 不是 dict")
 
             node = dict(item)
             name = str(node.get("name", "")).strip()
@@ -198,18 +208,18 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
             port = node.get("port")
 
             if not name:
-                raise RuntimeError(f"vpns_info[{index}] 缺少 name")
+                raise RuntimeError(f"{vpn_info_name}[{index}] 缺少 name")
             if not node_type:
-                raise RuntimeError(f"vpns_info[{index}] 缺少 type")
+                raise RuntimeError(f"{vpn_info_name}[{index}] 缺少 type")
             if not server:
-                raise RuntimeError(f"vpns_info[{index}] 缺少 server")
+                raise RuntimeError(f"{vpn_info_name}[{index}] 缺少 server")
 
             if isinstance(port, str) and port.isdigit():
                 node["port"] = int(port)
             elif isinstance(port, int):
                 node["port"] = port
             else:
-                raise RuntimeError(f"vpns_info[{index}] 的 port 非法: {port!r}")
+                raise RuntimeError(f"{vpn_info_name}[{index}] 的 port 非法: {port!r}")
 
             node["name"] = name
             node["type"] = node_type
@@ -409,7 +419,7 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
         last_vpn = self.get_vpn_for_container(names[-1])["name"]
         self.log(
             f"已准备 {len(names)} 个容器的 Clash 配置，"
-            f"共使用 {len(self._vpns)} 个节点，"
+            f"节点数组={self.get_vpn_info_name()}，共使用 {len(self._vpns)} 个节点，"
             f"按容器序号循环分配: {names[0]}->{first_vpn}, {names[-1]}->{last_vpn}"
         )
 

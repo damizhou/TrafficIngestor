@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-traffic_capture_single_csv_clash.py
+traffic_capture_single_csv_fixed_ip_europe_clash.py
 
-Read URLs from CSV and capture traffic with a container pool.
-Each container is assigned a dedicated Clash node.
+Read URLs from CSV and capture traffic through Clash nodes from a selected
+config/sever_info.py node list.
 """
 
-from datetime import datetime
 import os
 import sys
-from typing import Dict, List
 import time
+from typing import Dict, List
 
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_current_dir)
@@ -20,18 +19,20 @@ if _project_root not in sys.path:
 
 from trafficIngestor_clash.base_clash_traffic_ingestor import BaseClashTrafficIngestor
 
-BASE_DST_DATE = datetime.now().strftime("%y%m%d")
-
 
 class TrafficIngestor(BaseClashTrafficIngestor):
+    """Europe Clash traffic collector."""
+
+    VPN_INFO_NAME = "vpns_info_europ"
+
     CONTAINER_COUNT = 2 * 40
-    BASE_DST = f"/netdisk2/ww/trojan/wiki/260511/chrome/us"
+    BASE_DST = "/netdisk2/ww/trojan/wiki/260511/chrome/fra"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False
-    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_chrome.csv")
-    #
-    # CSV_PATH = os.path.join(_project_root, "small_tools", "result", "test.csv")
+
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_firefox.csv")
+
     def __init__(self):
         super().__init__()
         self._has_jobs = True
@@ -69,6 +70,4 @@ class TrafficIngestor(BaseClashTrafficIngestor):
 
 
 if __name__ == "__main__":
-    for i in range(5):
-        TrafficIngestor.main()
-        time.sleep(3600)
+    TrafficIngestor.main()

@@ -66,6 +66,8 @@ id,url,domain
   Chrome 批量流量采集，容器挂到独立网络 `traffic_ingestor_fixed_ip_rsia_net`，IP 从 `172.18.2.2` 开始递增
 - `python trafficIngestor_clash/traffic_capture_single_csv_clash.py`
   Chrome + Clash 批量流量采集，运行时按入口脚本名自动创建独立 Docker 网络，并从 `172.19.0.0/16` 地址池中选择可用 `/22` 子网
+- `python trafficIngestor_clash/traffic_capture_single_csv_fixed_ip_europe_clash.py`
+  Chrome + Clash 欧洲入口，使用 `config/sever_info.py` 中的 `vpns_info_europ` 节点数组；网络隔离逻辑与普通 Clash 入口一致
 - `python trafficIngestor/traffic_capture_single_csv_edge.py`
   Edge 测试或定向采集
 - `python trafficIngestor/traffic_capture_single_csv_firefox.py`
@@ -181,6 +183,8 @@ python -m py_compile tools\base_action.py tools\chrome.py tools\edge.py tools\fi
   Edge + Clash 采集入口；默认按入口脚本名自动生成独立的运行目录、容器名前缀和 Docker 网络。
 - `python trafficIngestor_clash/traffic_capture_single_csv_firefox_clash.py`
   Firefox + Clash 采集入口；默认按入口脚本名自动生成独立的运行目录、容器名前缀和 Docker 网络。
+- `python trafficIngestor_clash/traffic_capture_single_csv_fixed_ip_europe_clash.py`
+  Chrome + Clash 欧洲采集入口；通过入口脚本中的 `VPN_INFO_NAME = "vpns_info_europ"` 指定 `config/sever_info.py` 里的节点数组，Docker 网络由 Clash 基类自动分配。
 - `TRAFFIC_INGESTOR_RUN_NAME=my_firefox_batch python trafficIngestor_clash/traffic_capture_single_csv_firefox_clash.py`
   可选，用显式运行名覆盖默认脚本名隔离规则；适合同一入口脚本并行跑多批任务。
 - 容器内对应目录分别为 `traffic_capture_single_csv_edge_clash/` 与 `traffic_capture_single_csv_firefox_clash/`，仅在原 Edge / Firefox action 基础上额外注入 Clash 代理配置，原有非 Clash 入口不受影响。

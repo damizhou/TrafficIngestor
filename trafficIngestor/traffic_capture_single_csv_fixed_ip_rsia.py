@@ -25,10 +25,8 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     # ============== 配置 ==============
     SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_rsia_net"
-    CODE_DIR_NAME = 'traffic_capture_single_csv'
-    CONTAINER_COUNT = 15 * 5
-    HOST_CODE_PATH = os.path.join(_project_root, CODE_DIR_NAME)
-    BASE_DST = f'/netdisk2/ww/top2000/homepage_only/260409/chrome/sgp'
+    CONTAINER_COUNT = 2 * 40
+    BASE_DST = f'/netdisk2/ww/wiki/260514/chrome/sgp'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
@@ -43,7 +41,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # 示例：
     # id,url,domain
     # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'homeonly_merged_chrome_sgp.csv')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'wiki_edge.csv')
 
     def __init__(self):
         super().__init__()
