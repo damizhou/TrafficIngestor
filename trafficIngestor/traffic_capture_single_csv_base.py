@@ -24,11 +24,10 @@ class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
 
     # ============== 配置 ==============
-    CONTAINER_COUNT = 2 * 40
-    BASE_DST = f'/netdisk2/ww/wiki/260514/chrome/us'
+    CONTAINER_COUNT = 1
+    BASE_DST = f"/netdisk2/pcz/TrafficSimulation"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
-
     # CSV 必须包含表头，字段名（大小写不敏感）：
     # - id: 唯一标识，用于任务完成/失败后从 CSV 删除对应行
     # - url: 访问地址（建议完整 URL，包含 http:// 或 https://）
@@ -36,7 +35,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # 示例：
     # id,url,domain
     # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'wiki_chrome.csv')
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_temp.csv")
 
     def __init__(self):
         super().__init__()

@@ -41,7 +41,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # 示例：
     # id,url,domain
     # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'wiki_firefox.csv')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'wiki_firefox.csv ')
 
     def __init__(self):
         super().__init__()

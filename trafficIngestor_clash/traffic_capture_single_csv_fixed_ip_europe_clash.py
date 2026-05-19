@@ -26,12 +26,12 @@ class TrafficIngestor(BaseClashTrafficIngestor):
     VPN_INFO_NAME = "vpns_info_europ"
 
     CONTAINER_COUNT = 2 * 40
-    BASE_DST = "/netdisk2/ww/trojan/wiki/260511/chrome/fra"
+    BASE_DST = "/netdisk2/ww/trojan/top2000/homepage_only/260518/chrome/fra"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False
 
-    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_firefox.csv")
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "homeonly_merged_chrome_eu.csv")
 
     def __init__(self):
         super().__init__()
@@ -70,4 +70,6 @@ class TrafficIngestor(BaseClashTrafficIngestor):
 
 
 if __name__ == "__main__":
-    TrafficIngestor.main()
+    for i in range(5):
+        TrafficIngestor.main()
+        time.sleep(3600)
