@@ -25,7 +25,6 @@ class GithubTrafficIngestor(BaseTrafficIngestor):
     # ============== 配置 ==============
     CONTAINER_COUNT = 29
     BASE_DST = '/netdisk/github_with_ssl_key/lyl'
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 
     CSV_PATH = os.path.join(_project_root, 'db', 'github_repos_1000.csv')

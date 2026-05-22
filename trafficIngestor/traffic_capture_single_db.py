@@ -88,7 +88,6 @@ class TrafficIngestor(BaseTrafficIngestor):
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_db')
     BASE_DST = '/netdisk2/news_receiver'
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     BATCH_SIZE = 20000
     CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH = False

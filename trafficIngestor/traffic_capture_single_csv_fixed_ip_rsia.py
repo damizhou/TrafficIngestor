@@ -27,7 +27,6 @@ class TrafficIngestor(BaseTrafficIngestor):
     SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_rsia_net"
     CONTAINER_COUNT = 2 * 40
     BASE_DST = f'/netdisk2/ww/wiki/260514/chrome/sgp'
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
     DOCKER_NETWORK_SUBNET_PREFIX = 23

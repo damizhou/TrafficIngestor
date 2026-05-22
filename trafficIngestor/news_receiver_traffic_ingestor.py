@@ -37,6 +37,9 @@ _project_root = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+
+from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
+
 def get_real_username() -> str:
     """获取真实用户名，即使在 sudo 下也能获取原始用户"""
     return os.environ.get('SUDO_USER') or os.environ.get('USER') or os.getlogin()
@@ -47,8 +50,7 @@ CSV_PATH = os.path.join(_current_dir, 'urls_combined.csv')  # 使用相对路径
 BASE_NAME = 'single_traffice_capture'
 CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
 CONTAINER_COUNT = 3                    # 容器数量
-DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
-# DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"
+# 默认 Docker 镜像统一由 BaseTrafficIngestor.DOCKER_IMAGE 提供。
 CONTAINER_CODE_PATH = "/app"
 HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)  # 使用相对路径
 DASE_DST = '/netdisk/traffic_receiver'  # 外部存储路径，保持绝对路径
@@ -403,7 +405,7 @@ def prepare_pool_once() -> List[str]:
         """检查容器是否存在，不存在则创建"""
         exists = container_exists(name)
         if exists is None:
-            create_container(name, str(host_code), DOCKER_IMAGE)
+            create_container(name, str(host_code), BaseTrafficIngestor.DOCKER_IMAGE)
             with created_lock:
                 created.append(name)
 
@@ -450,7 +452,7 @@ def main():
             q.put(t)
 
         stats = {"ok": 0, "fail": 0, "errors": []}  # type: ignore[dict-item]
-        log(f"开始执行：jobs={len(jobs)}，并发容器={len(names)}，镜像={DOCKER_IMAGE}")
+        log(f"开始执行：jobs={len(jobs)}，并发容器={len(names)}，镜像={BaseTrafficIngestor.DOCKER_IMAGE}")
         with ThreadPoolExecutor(max_workers=len(names)) as pool:
             for n in names:
                 pool.submit(worker_loop, n, q, stats, RETRY)

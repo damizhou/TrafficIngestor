@@ -32,6 +32,9 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 
+from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
+
+
 def get_real_username() -> str:
     """获取真实用户名，即使在 sudo 下也能获取原始用户"""
     return os.environ.get('SUDO_USER') or os.environ.get('USER') or os.getlogin()
@@ -43,7 +46,7 @@ CSV_PATH = "collected_request_urls_all.csv"
 BASE_NAME = 'batch_traffice_capture'
 CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
 CONTAINER_COUNT = 19 * 5                       # 容器数量
-DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
+# 默认 Docker 镜像统一由 BaseTrafficIngestor.DOCKER_IMAGE 提供。
 CONTAINER_CODE_PATH = "/app"
 HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)  # 使用相对路径
 DASE_DST = '/netdisk/dataset/ablation_study/batch'  # 外部存储路径，保持绝对路径
@@ -353,7 +356,7 @@ def prepare_pool_once() -> List[str]:
     for n in names:
         exists = container_exists(n)
         if exists is None:
-            create_container(n, str(host_code), DOCKER_IMAGE)
+            create_container(n, str(host_code), BaseTrafficIngestor.DOCKER_IMAGE)
             created.append(n)
 
     for n in names:
@@ -392,7 +395,7 @@ def main():
             q.put(t)
 
         stats = {"ok": 0, "fail": 0, "errors": []}
-        log(f"开始执行：domain任务数={len(jobs)}，并发容器={len(names)}，镜像={DOCKER_IMAGE}")
+        log(f"开始执行：domain任务数={len(jobs)}，并发容器={len(names)}，镜像={BaseTrafficIngestor.DOCKER_IMAGE}")
 
         with ThreadPoolExecutor(max_workers=len(names)) as pool:
             for n in names:

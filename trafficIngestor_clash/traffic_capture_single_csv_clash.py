@@ -26,7 +26,6 @@ BASE_DST_DATE = datetime.now().strftime("%y%m%d")
 class TrafficIngestor(BaseClashTrafficIngestor):
     CONTAINER_COUNT = 2 * 40
     BASE_DST = f"/netdisk2/ww/trojan/top2000/homepage_only/260518/chrome/us"
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False
     CSV_PATH = os.path.join(_project_root, "small_tools", "result", "homeonly_merged_chrome.csv")

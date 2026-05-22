@@ -28,7 +28,10 @@ from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Any
 from concurrent.futures import ThreadPoolExecutor
 
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = None
 
 # 添加项目根目录到路径
 _current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -40,6 +43,24 @@ if _project_root not in sys.path:
 def get_real_username() -> str:
     """获取真实用户名，即使在 sudo 下也能获取原始用户"""
     return os.environ.get('SUDO_USER') or os.environ.get('USER') or os.getlogin()
+
+
+def get_default_uid() -> int:
+    """Return the host uid, with a Windows-safe fallback for import-time defaults."""
+    sudo_uid = os.environ.get('SUDO_UID')
+    if sudo_uid is not None:
+        return int(sudo_uid)
+    getuid = getattr(os, "getuid", None)
+    return int(getuid()) if getuid is not None else 1000
+
+
+def get_default_gid() -> int:
+    """Return the host gid, with a Windows-safe fallback for import-time defaults."""
+    sudo_gid = os.environ.get('SUDO_GID')
+    if sudo_gid is not None:
+        return int(sudo_gid)
+    getgid = getattr(os, "getgid", None)
+    return int(getgid()) if getgid is not None else 1000
 
 
 class BaseTrafficIngestor(ABC):
@@ -61,7 +82,7 @@ class BaseTrafficIngestor(ABC):
 
     # ============== 可选配置（有默认值）==============
     CONTAINER_COUNT: int = 3
-    DOCKER_IMAGE: str = "chuanzhoupan/trace_spider:250912"
+    DOCKER_IMAGE: str = "chuanzhoupan/trace_spider_chrome_148:260522"
     CONTAINER_CODE_PATH: str = "/app"
     CREATE_WITH_TTY: bool = True
     DOCKER_EXEC_TIMEOUT: int = 6000
@@ -73,8 +94,8 @@ class BaseTrafficIngestor(ABC):
     DOCKER_NETWORK_SUBNET_PREFIX: int = 24
     DOCKER_NETWORK_GATEWAY: Optional[str] = None
     DOCKER_NETWORK_ATTACHMENT_WARN_THRESHOLD: Optional[int] = 900
-    DEFAULT_UID: int = int(os.environ.get('SUDO_UID', os.getuid()))
-    DEFAULT_GID: int = int(os.environ.get('SUDO_GID', os.getgid()))
+    DEFAULT_UID: int = get_default_uid()
+    DEFAULT_GID: int = get_default_gid()
     CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH: bool = True
 
     def __init__(self):
@@ -101,7 +122,7 @@ class BaseTrafficIngestor(ABC):
         """打印带时间戳的日志，适配进度条"""
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
         msg = f"[{ts}] " + " ".join(str(x) for x in args)
-        if self._pbar is not None:
+        if self._pbar is not None and tqdm is not None:
             tqdm.write(msg)
         else:
             print(msg, flush=True)
@@ -1558,6 +1579,9 @@ class BaseTrafficIngestor(ABC):
         batch_num = 0
 
         # 创建常驻进度条（total=None 表示未知总数）
+        if tqdm is None:
+            self.log("FATAL: 缺少 Python 依赖 tqdm，请先安装后再运行采集器。")
+            sys.exit(2)
         self._pbar = tqdm(total=None, unit="个", position=0, leave=True,
                          bar_format='{desc}')
         self._pbar.set_description("任务进度: 0个 [初始化中...]")

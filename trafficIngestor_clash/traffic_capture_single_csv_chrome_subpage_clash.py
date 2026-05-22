@@ -23,7 +23,6 @@ from trafficIngestor_clash.base_clash_traffic_ingestor import BaseClashTrafficIn
 class TrafficIngestor(BaseClashTrafficIngestor):
     CONTAINER_COUNT = 15 * 30
     BASE_DST = "/netdisk2/ww/trojan/top2000/subpages_merged"
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False
     CSV_PATH = os.path.join(_project_root, "small_tools", "result", "subpages_merged.csv")

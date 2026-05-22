@@ -27,7 +27,6 @@ class TrafficIngestor(BaseClashTrafficIngestor):
 
     CONTAINER_COUNT = 2 * 40
     BASE_DST = "/netdisk2/ww/trojan/top2000/homepage_only/260518/chrome/sgp"
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False
 

@@ -26,7 +26,6 @@ class TrafficIngestor(BaseTrafficIngestor):
     CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_top2000_subpage')
     BASE_DST = '/netdisk/ww/top2000/subpages_merged'
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 
     # CSV 必须包含表头，字段名（大小写不敏感）：

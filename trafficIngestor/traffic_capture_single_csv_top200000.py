@@ -25,7 +25,6 @@ class TrafficIngestor(BaseTrafficIngestor):
     # ============== 配置 ==============
     CONTAINER_COUNT = 15 * 10
     BASE_DST = '/netdisk/ww/top200000'
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 
     # CSV 必须包含表头，字段名（大小写不敏感）：

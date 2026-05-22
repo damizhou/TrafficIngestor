@@ -37,6 +37,9 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 
+from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
+
+
 def get_real_username() -> str:
     """获取真实用户名。
 
@@ -59,8 +62,7 @@ CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
 CONTAINER_COUNT = 400
 # 宿主机上 url_list_collector 代码目录的绝对路径，会被挂载到容器内 /app
 HOST_CODE_PATH = os.path.join(_project_root, BASE_NAME)
-# 爬虫使用的 Docker 镜像名称
-DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
+# 默认 Docker 镜像统一由 BaseTrafficIngestor.DOCKER_IMAGE 提供。
 # 任务失败后的最大重试次数
 RETRY = 3
 DOCKER_DNS: Optional[str] = None
@@ -263,7 +265,7 @@ def prepare_pool_once() -> List[str]:
     def check_and_create(name: str) -> None:
         exists = container_exists(name)
         if exists is None:
-            create_container(name, str(host_code), DOCKER_IMAGE)
+            create_container(name, str(host_code), BaseTrafficIngestor.DOCKER_IMAGE)
             with created_lock:
                 created.append(name)
 
@@ -679,7 +681,7 @@ def run_once(names: List[str], jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
         "container_count": max(len(names), 1),
         "total_jobs": len(jobs),
     }
-    log(f"开始执行：jobs={len(jobs)}，并发容器={len(names)}，镜像={DOCKER_IMAGE}")
+    log(f"开始执行：jobs={len(jobs)}，并发容器={len(names)}，镜像={BaseTrafficIngestor.DOCKER_IMAGE}")
 
     with tqdm(
         total=len(jobs),

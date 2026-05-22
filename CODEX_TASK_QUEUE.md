@@ -88,3 +88,6 @@
 - [x] 已完成并验证：修复基础 CSV 采集器容器名冲突后仍继续启动的问题 - 2026-05-19 10:55
 - [x] 已完成并验证：为 Docker 容器创建卡住增加超时与诊断 - 2026-05-19 11:03
 - [x] 已完成并验证：修复 Docker 冲突容器删除后名字未释放即重试的问题 - 2026-05-19 11:09
+- [x] 已完成并验证：新增 `small_tools/code/dedupe_homeonly_merged_csv.py`，用于清理 `homeonly_merged.csv` 重复行并保留首次出现记录 - 2026-05-20 09:30
+- [x] 已完成并验证：优化 `small_tools/code/dedupe_homeonly_merged_csv.py` 为全局变量配置，并支持按 `MAX_OCCURRENCES_PER_RECORD` 保留指定重复次数 - 2026-05-20 09:38
+- [x] 已完成并验证：收敛默认 Docker 镜像配置到基类 - 2026-05-22 15:59

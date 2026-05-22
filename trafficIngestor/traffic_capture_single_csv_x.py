@@ -26,7 +26,6 @@ class TrafficIngestor(BaseTrafficIngestor):
     CONTAINER_COUNT = 15 * 5
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_x')
     BASE_DST = f'/netdisk/x_with_ssl_key/collection_without_login_{BASE_DST_DATE}'
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
     RETRY = 5
 
     # CSV 必须包含表头，字段名（大小写不敏感）：

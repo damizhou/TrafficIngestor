@@ -53,7 +53,7 @@ id,url,domain
 1,https://example.com,example.com
 ```
 
-不同采集器会在各自脚本中定义 `CSV_PATH`、`BASE_DST`、`CONTAINER_COUNT`、`DOCKER_IMAGE` 等常量，运行前请先检查。
+不同采集器会在各自脚本中定义 `CSV_PATH`、`BASE_DST`、`CONTAINER_COUNT` 等常量，运行前请先检查；默认 Docker 镜像由 `BaseTrafficIngestor.DOCKER_IMAGE` 提供，只有 Edge / Firefox 等浏览器专用入口需要显式覆盖。
 
 ### 2. 选择入口脚本
 常用入口：
@@ -94,12 +94,12 @@ id,url,domain
 ### CSV 采集任务
 每个 `trafficIngestor/traffic_capture_single_*.py` 都是一个具体采集器。常改配置包括：
 
-`trafficIngestor/` 下基于 `BaseTrafficIngestor` 的入口默认按脚本文件名自动推导 `BASE_NAME`、`CONTAINER_PREFIX` 和 `HOST_CODE_PATH`；多数入口只保留 CSV、镜像、并发、输出目录等实际业务配置。只有确实需要复用其他代码目录时，才需要显式覆盖 `HOST_CODE_PATH`。
+`trafficIngestor/` 下基于 `BaseTrafficIngestor` 的入口默认按脚本文件名自动推导 `BASE_NAME`、`CONTAINER_PREFIX` 和 `HOST_CODE_PATH`；多数入口只保留 CSV、并发、输出目录等实际业务配置。默认 Chrome 镜像统一来自基类，只有确实需要复用其他代码目录时，才需要显式覆盖 `HOST_CODE_PATH`。
 
 - `CSV_PATH`：输入任务 CSV
 - `BASE_DST`：最终输出目录
 - `CONTAINER_COUNT`：容器并发数
-- `DOCKER_IMAGE`：容器镜像
+- `DOCKER_IMAGE`：容器镜像；默认值在 `BaseTrafficIngestor` 中统一维护，只有 Edge / Firefox 等非默认镜像入口需要覆盖
 - `RETRY`：失败重试次数
 - `DOCKER_NETWORK`：固定 IP 模式使用的 Docker 自定义网络名
 - `DOCKER_NETWORK_SUBNET_PREFIX`：固定 IP 模式的 Docker 子网前缀长度
