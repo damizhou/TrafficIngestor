@@ -10,8 +10,10 @@ import os
 import sys
 import base64
 import json
+import shutil
 import subprocess
 import re
+import tempfile
 import time
 import math
 from pathlib import Path
@@ -58,6 +60,84 @@ function __select_all_and_copy_capture(){
   }
 }
 """
+
+def _log_driver_warning(logger, message):
+    if logger:
+        logger.warning(message)
+    else:
+        print(message)
+
+
+def _install_chrome_managed_policy(logger=None):
+    """在容器内写入 Chrome policy，尽量从源头关闭后台联网服务。"""
+    if not is_docker():
+        return
+
+    policy_path = Path("/etc/opt/chrome/policies/managed/traffic-ingestor-disable-background.json")
+    policy = {
+        "AutofillAddressEnabled": False,
+        "AutofillCreditCardEnabled": False,
+        "BackgroundModeEnabled": False,
+        "BrowserSignin": 0,
+        "ComponentUpdatesEnabled": False,
+        "DefaultNotificationsSetting": 2,
+        "DnsOverHttpsMode": "off",
+        "MetricsReportingEnabled": False,
+        "NetworkPredictionOptions": 2,
+        "PasswordManagerEnabled": False,
+        "PaymentMethodQueryEnabled": False,
+        "SafeBrowsingProtectionLevel": 0,
+        "SearchSuggestEnabled": False,
+        "SyncDisabled": True,
+        "TranslateEnabled": False,
+        "UrlKeyedAnonymizedDataCollectionEnabled": False,
+    }
+    content = json.dumps(policy, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+    try:
+        policy_path.parent.mkdir(parents=True, exist_ok=True)
+        if policy_path.exists() and policy_path.read_text(encoding="utf-8") == content:
+            return
+        policy_path.write_text(content, encoding="utf-8")
+    except OSError as e:
+        _log_driver_warning(logger, f"写入 Chrome 后台联网禁用 policy 失败: {e}")
+
+
+def _create_chrome_profile_dir(logger=None):
+    """为每次采集创建干净 profile，避免复用状态触发账号/同步/推送后台服务。"""
+    profile_dir = tempfile.mkdtemp(prefix="traffic-ingestor-chrome-profile-")
+    local_state = {
+        "background_mode": {"enabled": False},
+        "browser": {"enabled_labs_experiments": []},
+        "dns_over_https": {"mode": "off"},
+        "signin": {"allowed": False},
+    }
+    try:
+        Path(profile_dir, "Local State").write_text(
+            json.dumps(local_state, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as e:
+        _log_driver_warning(logger, f"写入 Chrome 临时 profile Local State 失败: {e}")
+    return profile_dir
+
+
+def _remove_chrome_profile_dir(profile_dir):
+    if profile_dir:
+        shutil.rmtree(profile_dir, ignore_errors=True)
+
+
+def _attach_profile_cleanup(browser, profile_dir):
+    original_quit = browser.quit
+
+    def quit_and_cleanup():
+        try:
+            return original_quit()
+        finally:
+            _remove_chrome_profile_dir(profile_dir)
+
+    browser.quit = quit_and_cleanup
+    return browser
 
 
 def is_docker():
@@ -120,8 +200,21 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
     os.makedirs(download_folder, exist_ok=True)
 
     os.environ["SE_OFFLINE"] = "true"
+    _install_chrome_managed_policy(logger)
+    chrome_profile_dir = _create_chrome_profile_dir(logger)
+
     _ACCEPT_LANGUAGE = "zh-CN,zh;q=0.9"
     _LANG_PRIMARY = "zh-CN"
+    _DISABLED_CHROME_FEATURES = ",".join((
+        "AsyncDns",
+        "AutofillServerCommunication",
+        "CertificateTransparencyComponentUpdater",
+        "DialMediaRouteProvider",
+        "InterestFeedContentSuggestions",
+        "MediaRouter",
+        "OptimizationHints",
+        "Translate",
+    ))
 
     # 创建 ChromeOptions 实例
     chrome_options = Options()
@@ -131,21 +224,36 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
         chrome_options.binary_location = "/usr/bin/google-chrome"
 
     chrome_options.add_argument('--headless')  # 无界面模式
+    chrome_options.add_argument(f"--user-data-dir={chrome_profile_dir}")
     chrome_options.add_argument("--disable-gpu")  # 禁用 GPU 加速
-    chrome_options.add_argument("--disable-features=AsyncDns")  # 禁用Chrome异步DNS，使用系统DNS
+    chrome_options.add_argument(f"--disable-features={_DISABLED_CHROME_FEATURES}")  # 降低后台服务联网
     chrome_options.add_argument("--disable-async-dns")  # 备用参数
+    chrome_options.add_argument("--disable-background-mode")
     chrome_options.add_argument("--no-sandbox")  # 禁用沙盒
     chrome_options.add_argument("--disable-dev-shm-usage")  # 限制使用/dev/shm
     chrome_options.add_argument("--incognito")  # 隐身模式
     chrome_options.add_argument("--disable-application-cache")  # 禁用应用缓存
+    chrome_options.add_argument("--disable-breakpad")
+    chrome_options.add_argument("--disable-client-side-phishing-detection")
+    chrome_options.add_argument("--disable-component-extensions-with-background-pages")
+    chrome_options.add_argument("--disable-component-update")
+    chrome_options.add_argument("--disable-crash-reporter")
+    chrome_options.add_argument("--disable-default-apps")
+    chrome_options.add_argument("--disable-domain-reliability")
     chrome_options.add_argument("--disable-extensions")  # 禁用扩展
     chrome_options.add_argument("--disable-infobars")  # 禁用信息栏
+    chrome_options.add_argument("--disable-quic")
     chrome_options.add_argument("--disable-software-rasterizer")  # 禁用软件光栅化
+    chrome_options.add_argument("--disable-sync")
+    chrome_options.add_argument("--dns-prefetch-disable")
+    chrome_options.add_argument("--safebrowsing-disable-auto-update")
     chrome_options.add_argument("--autoplay-policy=no-user-gesture-required")  # 允许自动播放
     chrome_options.add_argument(f"--lang={_LANG_PRIMARY}")  # 启动语言
     chrome_options.add_argument("--disable-background-networking")  # 降低背景"噪音"联网
+    chrome_options.add_argument("--metrics-recording-only")
     chrome_options.add_argument("--no-first-run")
     chrome_options.add_argument("--no-default-browser-check")
+    chrome_options.add_argument("--no-pings")
     chrome_options.add_argument("--homepage=about:blank")
     chrome_options.add_argument("--log-net-log=/tmp/netlog.json")
     chrome_options.add_argument("--net-log-capture-mode=Everything")
@@ -160,13 +268,22 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
 
     # 设置实验性首选项
     prefs = {
+        "alternate_error_pages.enabled": False,
+        "autofill.credit_card_enabled": False,
+        "autofill.profile_enabled": False,
         "profile.default_content_settings.popups": 0,
         "credentials_enable_service": False,  # 禁用密码管理器弹窗
+        "dns_prefetching.enabled": False,
         "profile.password_manager_enabled": False,  # 禁用密码管理器
+        "profile.password_manager_leak_detection": False,
         "download.default_directory": download_folder,  # 默认下载目录
         "download.prompt_for_download": False,  # 不提示下载
         "download.directory_upgrade": True,  # 升级下载目录
-        "safebrowsing.enabled": True,  # 启用安全浏览
+        "net.network_prediction_options": 2,
+        "safebrowsing.disable_download_protection": True,
+        "safebrowsing.enabled": False,
+        "signin.allowed_on_next_startup": False,
+        "translate.enabled": False,
         "intl.accept_languages": _ACCEPT_LANGUAGE,  # 首选语言
     }
     chrome_options.add_experimental_option("prefs", prefs)
@@ -181,7 +298,12 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
     else:
         service = Service()
 
-    browser = webdriver.Chrome(service=service, options=chrome_options)
+    try:
+        browser = webdriver.Chrome(service=service, options=chrome_options)
+    except Exception:
+        _remove_chrome_profile_dir(chrome_profile_dir)
+        raise
+    _attach_profile_cleanup(browser, chrome_profile_dir)
     browser.execute_cdp_cmd('Network.enable', {})
     browser.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {'Accept-Language': _ACCEPT_LANGUAGE}})
     browser.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument',

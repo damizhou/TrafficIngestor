@@ -91,3 +91,6 @@
 - [x] 已完成并验证：新增 `small_tools/code/dedupe_homeonly_merged_csv.py`，用于清理 `homeonly_merged.csv` 重复行并保留首次出现记录 - 2026-05-20 09:30
 - [x] 已完成并验证：优化 `small_tools/code/dedupe_homeonly_merged_csv.py` 为全局变量配置，并支持按 `MAX_OCCURRENCES_PER_RECORD` 保留指定重复次数 - 2026-05-20 09:38
 - [x] 已完成并验证：收敛默认 Docker 镜像配置到基类 - 2026-05-22 15:59
+- [x] 已完成并验证：新增 `small_tools/code/adjust_csv_repeat_count.py`，通过全局变量配置 CSV 路径与目标重复次数并下调重复记录保留次数 - 2026-05-27 15:14
+- [x] 已完成并验证：将 `small_tools/code/adjust_csv_repeat_count.py` 改为按第一轮唯一记录扩充目标重复次数 - 2026-05-28 14:44
+- [x] 已完成并验证：分析 Chrome 更新后 zh.wikipedia.org pcap 中 Google SNI 背景流量；暂不做域名阻断，仅在 `tools/chrome.py` 通过 Chrome policy、一次性 profile 和后台功能关闭减少后台联网产生 - 2026-05-28 23:40

@@ -26,7 +26,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # ============== 配置 ==============
     SHARED_FIXED_IP_NETWORK = "traffic_ingestor_fixed_ip_europe_net"
     CONTAINER_COUNT = 2 * 40
-    BASE_DST = f'/netdisk2/ww/wiki/260514/chrome/fra'
+    BASE_DST = f'/netdisk2/pcz/TrafficSimulation/260528/fra'
     RETRY = 5
     DOCKER_NETWORK = SHARED_FIXED_IP_NETWORK
     DOCKER_NETWORK_SUBNET_PREFIX = 23
@@ -40,7 +40,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # 示例：
     # id,url,domain
     # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'wiki_firefox.csv ')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'test10_fra.csv')
 
     def __init__(self):
         super().__init__()

@@ -24,8 +24,8 @@ class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
 
     # ============== 配置 ==============
-    CONTAINER_COUNT = 1
-    BASE_DST = f"/netdisk2/ww/top2000/homepage_only_10/260520"
+    CONTAINER_COUNT = 10
+    BASE_DST = f"/netdisk2/pcz/TrafficSimulation/260529/us"
     RETRY = 5
     # CSV 必须包含表头，字段名（大小写不敏感）：
     # - id: 唯一标识，用于任务完成/失败后从 CSV 删除对应行
@@ -34,7 +34,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # 示例：
     # id,url,domain
     # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "homeonly_merged_10.csv")
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "test1.csv")
 
     def __init__(self):
         super().__init__()
@@ -52,19 +52,20 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     def on_task_success(self, task: Dict[str, str], paths: Dict[str, str]) -> None:
         """任务成功后从 CSV 删除记录"""
-        match_url = task.get("url", "")
-        if match_url:
-            try:
-                self.remove_first_matching_row_from_csv(
-                    self.CSV_PATH,
-                    {
-                        "id": task.get("row_id", ""),
-                        "url": task.get("url", ""),
-                        "domain": task.get("domain", ""),
-                    },
-                )
-            except Exception as e:
-                self.log(f"ERROR: 删除 CSV 记录失败: {e}")
+        # match_url = task.get("url", "")
+        # if match_url:
+        #     try:
+        #         self.remove_first_matching_row_from_csv(
+        #             self.CSV_PATH,
+        #             {
+        #                 "id": task.get("row_id", ""),
+        #                 "url": task.get("url", ""),
+        #                 "domain": task.get("domain", ""),
+        #             },
+        #         )
+        #     except Exception as e:
+        #         self.log(f"ERROR: 删除 CSV 记录失败: {e}")
+        pass
 
 
     def should_continue(self) -> bool:
