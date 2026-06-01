@@ -6,7 +6,7 @@ import sys
 import os
 
 # 添加当前目录到路径（容器内 /app 包含 tools/ 子目录）
-_current_dir = os.path.dirname(os.path.abspath(__file__))
+_current_dir: str = os.path.dirname(os.path.abspath(__file__))
 if _current_dir not in sys.path:
     sys.path.insert(0, _current_dir)
 

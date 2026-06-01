@@ -13,8 +13,8 @@ import sys
 from typing import Dict, List
 import time
 
-_current_dir = os.path.dirname(os.path.abspath(__file__))
-_project_root = os.path.dirname(_current_dir)
+_current_dir: str = os.path.dirname(os.path.abspath(__file__))
+_project_root: str = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 

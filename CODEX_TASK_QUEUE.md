@@ -94,3 +94,10 @@
 - [x] 已完成并验证：新增 `small_tools/code/adjust_csv_repeat_count.py`，通过全局变量配置 CSV 路径与目标重复次数并下调重复记录保留次数 - 2026-05-27 15:14
 - [x] 已完成并验证：将 `small_tools/code/adjust_csv_repeat_count.py` 改为按第一轮唯一记录扩充目标重复次数 - 2026-05-28 14:44
 - [x] 已完成并验证：分析 Chrome 更新后 zh.wikipedia.org pcap 中 Google SNI 背景流量；暂不做域名阻断，仅在 `tools/chrome.py` 通过 Chrome policy、一次性 profile 和后台功能关闭减少后台联网产生 - 2026-05-28 23:40
+- [x] 已完成并验证：分析 `temp/zh.wikipedia.org/20260529092553` 残余流量，并在 `tools/chrome.py` 增加默认关闭的 Chrome 启动期后台端点阻断开关，验证 `python -m py_compile` 通过 - 2026-05-29 09:55
+- [ ] 复采 zh.wikipedia.org 并确认 pcap 中是否仍出现 Google 后台 SNI/DNS 与 `_ipp/_ipps._tcp.local` mDNS（高，0.5h）
+- [x] 已完成并验证：新增 `tools/ungoogled_chromium.py` 与 `temp/ungoogled_chromium_container_replacement.md`，并让 `tools/chrome.py` 支持外部浏览器/driver 路径 - 2026-05-29 10:45
+- [x] 已完成并验证：重新验收 ungoogled Chromium 工具脚本，并将 Git warning 原因写入 `temp/ungoogled_chromium_container_replacement.md` - 2026-05-29 10:55
+- [x] 已完成并验证：在 `document` 中记录当前可见采集数据信息 - 2026-06-01 09:39
+- [x] 已完成并验证：修复 `traffic_capture_single_csv_clash.py` 中 `_project_root` 类型推断过宽导致的 IDE 类型告警 - 2026-06-01 09:39
+- [x] 已完成并验证：统一补齐路径 bootstrap 变量 `_current_dir` / `_project_root` 的 `str` 类型标注 - 2026-06-01 09:39

@@ -9,7 +9,7 @@ from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 
 # 容器内工作目录
-_current_dir = os.path.dirname(os.path.abspath(__file__))
+_current_dir: str = os.path.dirname(os.path.abspath(__file__))
 # 显式指定 Scrapy 配置模块，避免在无 scrapy.cfg 场景下丢失项目设置
 os.environ.setdefault("SCRAPY_SETTINGS_MODULE", "trace_spider.settings")
 

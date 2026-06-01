@@ -21,8 +21,8 @@ from datetime import datetime
 from typing import Optional
 
 # 添加项目根目录到路径
-_current_dir = os.path.dirname(os.path.abspath(__file__))
-_project_root = os.path.dirname(_current_dir)
+_current_dir: str = os.path.dirname(os.path.abspath(__file__))
+_project_root: str = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
@@ -60,6 +60,73 @@ function __select_all_and_copy_capture(){
   }
 }
 """
+
+CHROME_BACKGROUND_BLOCKED_HOSTS = (
+    "www.google.com",
+    "accounts.google.com",
+    "clients2.google.com",
+    "android.clients.google.com",
+    "mtalk.google.com",
+)
+
+
+def _host_matches_domain(host, domain):
+    normalized_host = (host or "").strip(".").lower()
+    normalized_domain = (domain or "").strip(".").lower()
+    if not normalized_host or not normalized_domain:
+        return False
+    host_labels = normalized_host.split(".")
+    domain_labels = normalized_domain.split(".")
+    return (
+        normalized_host == normalized_domain
+        or normalized_host.endswith(f".{normalized_domain}")
+        or normalized_domain.endswith(f".{normalized_host}")
+        or (
+            len(host_labels) >= 2
+            and len(domain_labels) >= 2
+            and host_labels[-2:] == domain_labels[-2:]
+        )
+    )
+
+
+def get_chrome_background_blocked_hosts(allowed_domain=None):
+    """Return Chrome background endpoints blocked at browser startup."""
+    return tuple(
+        host
+        for host in CHROME_BACKGROUND_BLOCKED_HOSTS
+        if not _host_matches_domain(host, allowed_domain)
+    )
+
+
+def _env_flag_enabled(name):
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _normalize_hosts(hosts):
+    normalized_hosts = []
+    seen = set()
+    for host in hosts or ():
+        normalized_host = str(host).strip().strip(".").lower()
+        if not normalized_host or "/" in normalized_host or normalized_host in seen:
+            continue
+        seen.add(normalized_host)
+        normalized_hosts.append(normalized_host)
+    return tuple(normalized_hosts)
+
+
+def _build_host_resolver_rules(blocked_hosts):
+    return ",".join(
+        f"MAP {host} ^NOTFOUND"
+        for host in _normalize_hosts(blocked_hosts)
+    )
+
+
+def _build_blocked_url_patterns(blocked_hosts):
+    return [
+        f"*://{host}/*"
+        for host in _normalize_hosts(blocked_hosts)
+    ]
+
 
 def _log_driver_warning(logger, message):
     if logger:
@@ -160,7 +227,9 @@ def is_docker():
 
 def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
                           enable_ssl_key_log=True, data_base_dir=None,
-                          proxy_server=None, proxy_bypass_list=None, logger=None):
+                          proxy_server=None, proxy_bypass_list=None, logger=None,
+                          blocked_hosts=None, chrome_binary_path=None,
+                          chromedriver_path=None):
     """
     创建Chrome浏览器驱动
 
@@ -202,6 +271,13 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
     os.environ["SE_OFFLINE"] = "true"
     _install_chrome_managed_policy(logger)
     chrome_profile_dir = _create_chrome_profile_dir(logger)
+    if blocked_hosts is None:
+        blocked_hosts = (
+            get_chrome_background_blocked_hosts(task_name)
+            if _env_flag_enabled("CHROME_BACKGROUND_BLOCK_HOSTS")
+            else ()
+        )
+    normalized_blocked_hosts = _normalize_hosts(blocked_hosts)
 
     _ACCEPT_LANGUAGE = "zh-CN,zh;q=0.9"
     _LANG_PRIMARY = "zh-CN"
@@ -211,8 +287,10 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
         "CertificateTransparencyComponentUpdater",
         "DialMediaRouteProvider",
         "InterestFeedContentSuggestions",
+        "LocalDiscovery",
         "MediaRouter",
         "OptimizationHints",
+        "PrintCompositorService",
         "Translate",
     ))
 
@@ -220,8 +298,11 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
     chrome_options = Options()
 
     # Docker环境设置
-    if is_docker():
-        chrome_options.binary_location = "/usr/bin/google-chrome"
+    resolved_chrome_binary_path = chrome_binary_path
+    if resolved_chrome_binary_path is None and is_docker():
+        resolved_chrome_binary_path = "/usr/bin/google-chrome"
+    if resolved_chrome_binary_path:
+        chrome_options.binary_location = resolved_chrome_binary_path
 
     chrome_options.add_argument('--headless')  # 无界面模式
     chrome_options.add_argument(f"--user-data-dir={chrome_profile_dir}")
@@ -243,6 +324,7 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
     chrome_options.add_argument("--disable-extensions")  # 禁用扩展
     chrome_options.add_argument("--disable-infobars")  # 禁用信息栏
     chrome_options.add_argument("--disable-quic")
+    chrome_options.add_argument("--disable-print-preview")
     chrome_options.add_argument("--disable-software-rasterizer")  # 禁用软件光栅化
     chrome_options.add_argument("--disable-sync")
     chrome_options.add_argument("--dns-prefetch-disable")
@@ -261,6 +343,10 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
         chrome_options.add_argument(f"--proxy-server={proxy_server}")
     if proxy_bypass_list:
         chrome_options.add_argument(f"--proxy-bypass-list={proxy_bypass_list}")
+    if normalized_blocked_hosts:
+        chrome_options.add_argument(
+            f"--host-resolver-rules={_build_host_resolver_rules(normalized_blocked_hosts)}"
+        )
 
     # SSL密钥日志
     if ssl_key_file_path:
@@ -292,7 +378,9 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
     chrome_options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
 
     # 创建 WebDriver 实例
-    service_executable_path = "/usr/local/bin/chromedriver" if is_docker() else None
+    service_executable_path = chromedriver_path
+    if service_executable_path is None and is_docker():
+        service_executable_path = "/usr/local/bin/chromedriver"
     if service_executable_path:
         service = Service(executable_path=service_executable_path)
     else:
@@ -305,6 +393,14 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
         raise
     _attach_profile_cleanup(browser, chrome_profile_dir)
     browser.execute_cdp_cmd('Network.enable', {})
+    if normalized_blocked_hosts:
+        try:
+            browser.execute_cdp_cmd(
+                'Network.setBlockedURLs',
+                {'urls': _build_blocked_url_patterns(normalized_blocked_hosts)}
+            )
+        except Exception as e:
+            _log_driver_warning(logger, f"设置 Chrome URL 拦截规则失败: {e}")
     browser.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {'Accept-Language': _ACCEPT_LANGUAGE}})
     browser.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument',
                             {'source': '''
