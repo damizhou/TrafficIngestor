@@ -323,7 +323,6 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
     chrome_options.add_argument("--disable-domain-reliability")
     chrome_options.add_argument("--disable-extensions")  # 禁用扩展
     chrome_options.add_argument("--disable-infobars")  # 禁用信息栏
-    chrome_options.add_argument("--disable-quic")
     chrome_options.add_argument("--disable-print-preview")
     chrome_options.add_argument("--disable-software-rasterizer")  # 禁用软件光栅化
     chrome_options.add_argument("--disable-sync")
