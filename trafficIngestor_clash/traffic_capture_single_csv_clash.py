@@ -25,10 +25,10 @@ BASE_DST_DATE = datetime.now().strftime("%y%m%d")
 
 class TrafficIngestor(BaseClashTrafficIngestor):
     CONTAINER_COUNT = 15 * 40
-    BASE_DST = f"/netdisk2/ww/trojan/wiki/260601/chrome/us"
+    BASE_DST = f"/netdisk2/ww/trojan/top2000/homepage_only_10/260605"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False
-    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki.csv")
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "homeonly_merged_10_clash.csv")
     #
     # CSV_PATH = os.path.join(_project_root, "small_tools", "result", "test.csv")
     def __init__(self):

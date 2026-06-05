@@ -13,6 +13,7 @@ import os
 import ipaddress
 import importlib
 import re
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -264,14 +265,26 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
         except (TypeError, ValueError):
             return 0
 
+    def get_clash_outer_tls_keylog_container_size(self, name: str) -> int:
+        source_path = self.get_clash_outer_tls_keylog_container_path(name)
+        shell = f"""
+SOURCE={shlex.quote(source_path)}
+if [ -f "$SOURCE" ]; then
+    stat -c %s "$SOURCE"
+else
+    echo 0
+fi
+"""
+        cp = self.run_cmd(["docker", "exec", name, "bash", "-lc", shell], timeout=30)
+        if cp.returncode != 0:
+            return 0
+        try:
+            return max(int((cp.stdout or "0").strip().splitlines()[-1]), 0)
+        except (IndexError, ValueError):
+            return 0
+
     def record_task_clash_outer_tls_keylog_start_offset(self, task: Dict[str, Any], name: str) -> int:
-        source_path = self.get_clash_outer_tls_keylog_host_path(name)
-        offset = 0
-        if source_path.is_file():
-            try:
-                offset = max(int(source_path.stat().st_size), 0)
-            except OSError:
-                offset = 0
+        offset = self.get_clash_outer_tls_keylog_container_size(name)
         task[self.CLASH_TLS_KEYLOG_TASK_OFFSET_KEY] = offset
         return offset
 
@@ -334,20 +347,8 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
         task: Dict[str, Any],
         result: Dict[str, Any],
     ) -> Optional[str]:
-        source_path = self.get_clash_outer_tls_keylog_host_path(name)
-        if not source_path.is_file():
-            self.log(
-                f"WARNING: {name} 缺少 Trojan 外层 TLS keylog: {source_path}; "
-                "请确认已替换支持 SSLKEYLOGFILE 的 Clash/Trojan core"
-            )
-            return None
-
         start_offset = self.get_task_clash_outer_tls_keylog_start_offset(task)
-        try:
-            current_size = max(int(source_path.stat().st_size), 0)
-        except OSError as exc:
-            self.log(f"WARNING: {name} 无法读取 Trojan 外层 TLS keylog 大小: {source_path} -> {exc}")
-            return None
+        current_size = self.get_clash_outer_tls_keylog_container_size(name)
 
         if start_offset > current_size:
             self.log(
@@ -358,18 +359,69 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
 
         snapshot_name = self.build_clash_outer_tls_keylog_snapshot_name(result, name)
 
-        snapshot_dir = self.get_clash_runtime_host_dir(name) / self.CLASH_TLS_KEYLOG_SNAPSHOT_DIR_NAME
-        snapshot_dir.mkdir(parents=True, exist_ok=True)
-        snapshot_path = snapshot_dir / snapshot_name
-        with open(source_path, "rb") as src, open(snapshot_path, "wb") as dst_f:
-            src.seek(start_offset)
-            shutil.copyfileobj(src, dst_f)
-        if snapshot_path.stat().st_size == 0:
+        source_path = self.get_clash_outer_tls_keylog_container_path(name)
+        snapshot_container_dir = (
+            f"{self.get_clash_runtime_container_dir(name)}/"
+            f"{self.CLASH_TLS_KEYLOG_SNAPSHOT_DIR_NAME}"
+        )
+        snapshot_container_path = f"{snapshot_container_dir}/{snapshot_name}"
+        snapshot_host_path = (
+            self.get_clash_runtime_host_dir(name)
+            / self.CLASH_TLS_KEYLOG_SNAPSHOT_DIR_NAME
+            / snapshot_name
+        )
+        owner = f"{self.DEFAULT_UID}:{self.DEFAULT_GID}"
+        dir_mode = format(self.SUCCESS_OUTPUT_DIR_MODE, "o")
+        file_mode = format(self.SUCCESS_OUTPUT_FILE_MODE, "o")
+        shell = f"""
+set -e
+SOURCE={shlex.quote(source_path)}
+SNAPDIR={shlex.quote(snapshot_container_dir)}
+SNAP={shlex.quote(snapshot_container_path)}
+START={int(start_offset)}
+if [ ! -f "$SOURCE" ]; then
+    echo "missing Trojan outer TLS keylog: $SOURCE" >&2
+    exit 3
+fi
+mkdir -p "$SNAPDIR"
+python - "$SOURCE" "$SNAP" "$START" <<'PY'
+import shutil
+import sys
+
+source, snapshot, start_text = sys.argv[1:4]
+start = max(int(start_text), 0)
+with open(source, "rb") as src, open(snapshot, "wb") as dst:
+    src.seek(start)
+    shutil.copyfileobj(src, dst)
+PY
+chown {shlex.quote(owner)} "$SNAPDIR" "$SNAP"
+chmod {dir_mode} "$SNAPDIR"
+chmod {file_mode} "$SNAP"
+stat -c %s "$SNAP"
+"""
+        cp = self.run_cmd(["docker", "exec", name, "bash", "-lc", shell], timeout=60)
+        if cp.returncode == 3:
+            self.log(
+                f"WARNING: {name} 缺少 Trojan 外层 TLS keylog: "
+                f"{self.get_clash_outer_tls_keylog_host_path(name)}; "
+                "请确认已替换支持 SSLKEYLOGFILE 的 Clash/Trojan core"
+            )
+            return None
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
+            self.log(f"WARNING: {name} 复制 Trojan 外层 TLS keylog 快照失败: {detail}")
+            return None
+
+        try:
+            snapshot_size = max(int((cp.stdout or "0").strip().splitlines()[-1]), 0)
+        except (IndexError, ValueError):
+            snapshot_size = -1
+        if snapshot_size == 0:
             self.log(
                 f"WARNING: {name} 当前任务未产生新增的 Trojan 外层 TLS keylog: "
                 f"{snapshot_name}; 可能复用了已有 TLS 会话"
             )
-        return str(snapshot_path)
+        return str(snapshot_host_path)
 
     def exec_once(self, task: Dict[str, str]) -> Tuple[bool, str]:
         container = str(task.get("container", "")).strip()
