@@ -85,7 +85,6 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     # ============== 配置 ==============
     # 默认并发不宜过高；可通过环境变量覆盖（例如 180）
-    CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_db')
     BASE_DST = '/netdisk2/news_receiver'
     RETRY = 5

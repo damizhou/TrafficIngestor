@@ -21,7 +21,6 @@ from trafficIngestor_clash.base_clash_traffic_ingestor import BaseClashTrafficIn
 
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    CONTAINER_COUNT = 15 * 30
     BASE_DST = "/netdisk2/ww/trojan/top2000/subpages_merged"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False

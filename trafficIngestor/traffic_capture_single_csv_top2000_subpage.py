@@ -23,7 +23,6 @@ class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
 
     # ============== 配置 ==============
-    CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_top2000_subpage')
     BASE_DST = '/netdisk/ww/top2000/subpages_merged'
     RETRY = 5

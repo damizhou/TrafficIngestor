@@ -24,9 +24,8 @@ class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
 
     # ============== 配置 ==============
-    CONTAINER_COUNT = 15 * 5
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_mastodon')
-    BASE_DST = f'/netdisk/lyl/{BASE_DST_DATE}/chrome/without_login'
+    BASE_DST = f'/netdisk/mlj/urls_tls13_hybrid_top100/20260605/'
     RETRY = 5
 
     # CSV 必须包含表头，字段名（大小写不敏感）：
@@ -36,7 +35,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     # 示例：
     # id,url,domain
     # 1,https://vox-cdn.com,vox-cdn.com
-    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'mastodon_social_urls_1000.csv')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', 'result', 'urls_tls13_hybrid_top100.csv')
 
     def __init__(self):
         super().__init__()

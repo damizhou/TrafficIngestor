@@ -23,7 +23,6 @@ class GithubTrafficIngestor(BaseTrafficIngestor):
     """GitHub 流量采集器"""
 
     # ============== 配置 ==============
-    CONTAINER_COUNT = 29
     BASE_DST = '/netdisk/github_with_ssl_key/lyl'
     RETRY = 5
 

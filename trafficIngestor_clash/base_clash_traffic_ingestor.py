@@ -79,7 +79,8 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
         prefix = int(self.AUTO_DOCKER_NETWORK_SUBNET_PREFIX)
         start_offset = max(int(self.AUTO_DOCKER_NETWORK_START_OFFSET), 2)
         gateway_offset = max(int(self.AUTO_DOCKER_NETWORK_GATEWAY_OFFSET), 1)
-        required_usable = max(int(self.CONTAINER_COUNT), 1) + start_offset + 4
+        container_count = self.get_container_count()
+        required_usable = container_count + start_offset + 4
         required_total = required_usable + 2
         if prefix < pool.prefixlen or prefix > 30:
             raise RuntimeError(f"invalid auto docker subnet prefix /{prefix} for pool {pool}")
@@ -87,7 +88,7 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
         subnet_size = 1 << (32 - prefix)
         if required_total > subnet_size:
             raise RuntimeError(
-                f"auto docker subnet /{prefix} is too small for {self.CONTAINER_COUNT} containers"
+                f"auto docker subnet /{prefix} is too small for {container_count} containers"
             )
         if gateway_offset >= subnet_size - 1:
             raise RuntimeError(f"gateway offset {gateway_offset} is outside auto subnet /{prefix}")

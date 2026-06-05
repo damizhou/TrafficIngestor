@@ -29,9 +29,9 @@ from urllib.parse import urlparse
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SMALL_TOOLS_DIR = SCRIPT_DIR.parent
-DEFAULT_INPUT = SMALL_TOOLS_DIR / "origin" / "bsky_urls_1000.txt"
+DEFAULT_INPUT = SMALL_TOOLS_DIR / "origin" / "urls_tls13_traditional_top100.txt"
 DEFAULT_OUTPUT = SMALL_TOOLS_DIR / "result" / f"{DEFAULT_INPUT.stem}.csv"
-DEFAULT_REPEAT_COUNT = 50
+DEFAULT_REPEAT_COUNT = 100
 FIELDNAMES = ["id", "url", "domain"]
 
 
@@ -73,7 +73,7 @@ def load_rows(input_path: Path, start_id: int, repeat_count: int) -> Tuple[List[
 
             row_id = start_id + len(base_rows)
             base_rows.append({
-                "id": str(row_id),
+                "id": 1,
                 "url": url,
                 "domain": domain,
             })

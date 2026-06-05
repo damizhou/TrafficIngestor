@@ -24,7 +24,6 @@ BASE_DST_DATE = datetime.now().strftime("%y%m%d")
 
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    CONTAINER_COUNT = 15 * 40
     BASE_DST = f"/netdisk2/ww/trojan/top2000/homepage_only_10/260605"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False

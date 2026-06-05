@@ -23,7 +23,6 @@ class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
 
     # ============== 配置 ==============
-    CONTAINER_COUNT = 15 * 10
     BASE_DST = '/netdisk/ww/top200000'
     RETRY = 5
 

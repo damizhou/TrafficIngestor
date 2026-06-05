@@ -82,7 +82,9 @@ class BaseTrafficIngestor(ABC):
     BASE_DST: str = ""
 
     # ============== 可选配置（有默认值）==============
-    CONTAINER_COUNT: int = 3
+    CONTAINER_COUNT: Optional[int] = None
+    MAX_DYNAMIC_CONTAINER_COUNT: int = 600
+    DYNAMIC_CONTAINER_TASKS_PER_CONTAINER: int = 10
     DOCKER_IMAGE: str = "chuanzhoupan/trace_spider_chrome_148:260522"
     CONTAINER_CODE_PATH: str = "/app"
     CREATE_WITH_TTY: bool = True
@@ -121,7 +123,7 @@ class BaseTrafficIngestor(ABC):
         self._global_ok = 0
         self._global_fail = 0
         self._global_total_jobs = 0
-        self._global_container_count = max(int(self.CONTAINER_COUNT), 1)
+        self._global_container_count = 1
 
     # ============== 日志 ==============
     def log(self, *args) -> None:
@@ -867,7 +869,40 @@ class BaseTrafficIngestor(ABC):
 
     def build_container_names(self) -> List[str]:
         """构建容器名列表"""
-        return [f"{self.CONTAINER_PREFIX}{i}" for i in range(self.CONTAINER_COUNT)]
+        return [f"{self.CONTAINER_PREFIX}{i}" for i in range(self.get_container_count())]
+
+    def get_container_count(self) -> int:
+        """Return the resolved positive container count."""
+        configured = getattr(self, "CONTAINER_COUNT", None)
+        if configured is None:
+            return 1
+        return max(int(configured), 1)
+
+    def resolve_container_count(self, task_count: int) -> int:
+        """Resolve explicit or task-count-based container count before pool creation."""
+        configured = getattr(self, "CONTAINER_COUNT", None)
+        if configured is not None:
+            return max(int(configured), 1)
+
+        tasks_per_container = max(int(self.DYNAMIC_CONTAINER_TASKS_PER_CONTAINER), 1)
+        max_count = max(int(self.MAX_DYNAMIC_CONTAINER_COUNT), 1)
+        task_count = max(int(task_count), 0)
+        dynamic_count = (task_count + tasks_per_container - 1) // tasks_per_container
+        return min(dynamic_count, max_count)
+
+    def configure_container_count_for_jobs(self, jobs: List[Dict[str, str]]) -> int:
+        """Set CONTAINER_COUNT once the first task batch is known."""
+        was_dynamic = getattr(self, "CONTAINER_COUNT", None) is None
+        count = self.resolve_container_count(len(jobs))
+        self.CONTAINER_COUNT = count
+        if was_dynamic:
+            self.log(
+                f"动态容器数={count}（任务数={len(jobs)}，"
+                f"按每 {self.DYNAMIC_CONTAINER_TASKS_PER_CONTAINER} 个任务向上取整，上限={self.MAX_DYNAMIC_CONTAINER_COUNT}）"
+            )
+        else:
+            self.log(f"容器数={count}（显式配置）")
+        return count
 
     def get_default_action_source(self) -> Path:
         """Return the fallback action.py path."""
@@ -1798,6 +1833,7 @@ class BaseTrafficIngestor(ABC):
                         )
 
                 if not self._runtime_prepared:
+                    self.configure_container_count_for_jobs(jobs)
                     self.remove_containers()
                     self.clear_host_code_subdirs()
                     names = self.prepare_pool_once()

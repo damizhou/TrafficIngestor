@@ -22,7 +22,6 @@ from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
 class TrafficIngestor(BaseTrafficIngestor):
     """Firefox 流量采集器"""
 
-    CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_firefox')
     BASE_DST = '/netdisk2/ww/wiki/0325/firefox'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"

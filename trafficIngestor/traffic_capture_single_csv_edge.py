@@ -22,7 +22,6 @@ from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
 class TrafficIngestor(BaseTrafficIngestor):
     """Edge 流量采集器"""
 
-    CONTAINER_COUNT = 15 * 10
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_edge')
     BASE_DST = '/netdisk2/ww/wiki/0325/edge'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_edge:260309"

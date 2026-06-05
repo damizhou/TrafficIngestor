@@ -24,7 +24,6 @@ class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
 
     # ============== 配置 ==============
-    CONTAINER_COUNT = 15 * 40
     BASE_DST = f"/netdisk2/ww/top2000/homepage_only_10/260605"
     RETRY = 5
     # CSV 必须包含表头，字段名（大小写不敏感）：

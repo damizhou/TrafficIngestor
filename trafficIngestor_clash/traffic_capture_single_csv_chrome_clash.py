@@ -24,7 +24,6 @@ BASE_DST_DATE = datetime.now().strftime("%y%m%d")
 
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    CONTAINER_COUNT = 15 * 5
     BASE_DST = f"/netdisk2/ww/trojan/wiki/260413/chrome"
     RETRY = 5
     DELETE_INVALID_FILES_ON_FAIL = False

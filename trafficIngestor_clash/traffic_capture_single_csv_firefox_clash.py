@@ -23,7 +23,6 @@ BASE_DST_DATE = datetime.now().strftime("%y%m%d")
 
 
 class TrafficIngestor(BaseClashTrafficIngestor):
-    CONTAINER_COUNT = 150
     BASE_DST = f"/netdisk2/ww/trojan/wiki/260413/firefox"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"
     RETRY = 5
