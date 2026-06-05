@@ -251,18 +251,20 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
         data_base_dir = _project_root
 
     ssl_key_file_path = None
+    raw_ssl_key_file_path = None
 
     if enable_ssl_key_log and task_name and formatted_time:
         current_time = datetime.now()
         current_data = current_time.strftime("%Y%m%d")
         ssl_key_dir = os.path.join(data_base_dir, "ssl_key", current_data)
+        raw_ssl_key_dir = os.path.join(data_base_dir, "ssl_key_tmp", current_data)
         os.makedirs(ssl_key_dir, exist_ok=True)
+        os.makedirs(raw_ssl_key_dir, exist_ok=True)
 
         filename_prefix = f'{parsers}_' if parsers else ''
-        ssl_key_file_path = os.path.join(
-            ssl_key_dir,
-            f"{filename_prefix}{formatted_time}_{task_name}_ssl_key.log"
-        )
+        ssl_key_filename = f"{filename_prefix}{formatted_time}_{task_name}_ssl_key.log"
+        ssl_key_file_path = os.path.join(ssl_key_dir, ssl_key_filename)
+        raw_ssl_key_file_path = os.path.join(raw_ssl_key_dir, ssl_key_filename)
 
     # 在当前目录中创建download文件夹
     download_folder = os.path.join(os.getcwd(), 'download')
@@ -349,7 +351,7 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
 
     # SSL密钥日志
     if ssl_key_file_path:
-        chrome_options.add_argument(f"--ssl-key-log-file={ssl_key_file_path}")
+        chrome_options.add_argument(f"--ssl-key-log-file={raw_ssl_key_file_path or ssl_key_file_path}")
 
     # 设置实验性首选项
     prefs = {
@@ -409,6 +411,8 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
                             '''.strip()})
 
     if ssl_key_file_path:
+        browser._traffic_ingestor_ssl_key_source_path = raw_ssl_key_file_path or ssl_key_file_path
+        browser._traffic_ingestor_ssl_key_final_path = ssl_key_file_path
         return browser, ssl_key_file_path
     return browser
 

@@ -4,6 +4,7 @@ BaseAction基类 - 抽取action.py中的公共方法
 """
 import json
 import os
+import shutil
 import sys
 import subprocess
 import time
@@ -153,6 +154,25 @@ class BaseAction(ABC):
             data_base_dir=_project_root,
             logger=self.logger,
         )
+
+    def finalize_ssl_key_file(self, browser, ssl_key_file_path):
+        """Copy a browser-held SSL keylog source to the stable result path."""
+        source_path = getattr(browser, "_traffic_ingestor_ssl_key_source_path", ssl_key_file_path)
+        final_path = getattr(browser, "_traffic_ingestor_ssl_key_final_path", ssl_key_file_path)
+        if not source_path or not final_path or source_path == final_path:
+            return ssl_key_file_path
+
+        if not os.path.exists(source_path):
+            raise FileNotFoundError(f"SSL keylog source file missing: {source_path}")
+
+        os.makedirs(os.path.dirname(final_path), exist_ok=True)
+        shutil.copy2(source_path, final_path)
+        try:
+            os.remove(source_path)
+        except OSError as e:
+            if self.logger is not None:
+                self.logger.warning(f"删除临时 SSL keylog 失败: {source_path} -> {e}")
+        return final_path
 
     def get_capture_exclude_hosts(self):
         """返回需要从抓包中排除的主机列表，子类可覆盖。"""
@@ -417,6 +437,13 @@ class BaseAction(ABC):
 
         self.logger.info("清理浏览器进程(兜底)")
         self.kill_browser_processes()
+
+        if browser is not None and ssl_key_file_path:
+            try:
+                ssl_key_file_path = self.finalize_ssl_key_file(browser, ssl_key_file_path)
+            except Exception as e:
+                open_url_error = repr(e).replace("\n", " ")
+                self.logger.error(f"SSL keylog 最终复制异常: {e}")
 
         if traffic_thread is not None:
             self.logger.info(f"等待TCP结束挥手完成，耗时60秒")

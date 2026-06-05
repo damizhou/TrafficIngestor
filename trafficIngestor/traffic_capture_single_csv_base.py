@@ -52,20 +52,20 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     def on_task_success(self, task: Dict[str, str], paths: Dict[str, str]) -> None:
         """任务成功后从 CSV 删除记录"""
-        # match_url = task.get("url", "")
-        # if match_url:
-        #     try:
-        #         self.remove_first_matching_row_from_csv(
-        #             self.CSV_PATH,
-        #             {
-        #                 "id": task.get("row_id", ""),
-        #                 "url": task.get("url", ""),
-        #                 "domain": task.get("domain", ""),
-        #             },
-        #         )
-        #     except Exception as e:
-        #         self.log(f"ERROR: 删除 CSV 记录失败: {e}")
-        pass
+        match_url = task.get("url", "")
+        if match_url:
+            try:
+                self.remove_first_matching_row_from_csv(
+                    self.CSV_PATH,
+                    {
+                        "id": task.get("row_id", ""),
+                        "url": task.get("url", ""),
+                        "domain": task.get("domain", ""),
+                    },
+                )
+            except Exception as e:
+                self.log(f"ERROR: 删除 CSV 记录失败: {e}")
+        # pass
 
 
     def should_continue(self) -> bool:

@@ -12,6 +12,7 @@ import csv
 import hashlib
 import ipaddress
 import os
+import posixpath
 import re
 import stat
 import sys
@@ -97,6 +98,11 @@ class BaseTrafficIngestor(ABC):
     DEFAULT_UID: int = get_default_uid()
     DEFAULT_GID: int = get_default_gid()
     CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH: bool = True
+    REJECT_SUDO_RUNS_ON_START: bool = True
+    VERIFY_BASE_DST_WRITABLE_ON_START: bool = True
+    NORMALIZE_SUCCESS_OUTPUT_MODES: bool = True
+    SUCCESS_OUTPUT_DIR_MODE: int = 0o775
+    SUCCESS_OUTPUT_FILE_MODE: int = 0o664
 
     def __init__(self):
         self._runtime_entry_script = self.get_entry_script_path()
@@ -970,34 +976,203 @@ class BaseTrafficIngestor(ABC):
                     self.log(f"WARN: 删除子目录失败: {entry} -> {e}")
 
 
-    def chown_recursive(self, path: str, uid: int = None, gid: int = None) -> None:
-        """递归设置文件/目录的所有者"""
-        uid = uid or self.DEFAULT_UID
-        gid = gid or self.DEFAULT_GID
+    def chown_path(self, path: str, uid: int = None, gid: int = None) -> None:
+        """Set one path owner when the current process is allowed to do so."""
+        uid = self.DEFAULT_UID if uid is None else uid
+        gid = self.DEFAULT_GID if gid is None else gid
         try:
             os.chown(path, uid, gid, follow_symlinks=False)
         except Exception:
             pass
+
+    def chown_recursive(self, path: str, uid: int = None, gid: int = None) -> None:
+        """递归设置文件/目录的所有者"""
+        uid = self.DEFAULT_UID if uid is None else uid
+        gid = self.DEFAULT_GID if gid is None else gid
+        self.chown_path(path, uid, gid)
         if os.path.isdir(path):
             for root, dirs, files in os.walk(path, followlinks=False):
                 for name in dirs:
                     p = os.path.join(root, name)
-                    try:
-                        os.chown(p, uid, gid, follow_symlinks=False)
-                    except Exception:
-                        pass
+                    self.chown_path(p, uid, gid)
                 for name in files:
                     p = os.path.join(root, name)
-                    try:
-                        os.chown(p, uid, gid, follow_symlinks=False)
-                    except Exception:
-                        pass
+                    self.chown_path(p, uid, gid)
 
-    def move_and_chown(self, src: str, dst_dir: str) -> str:
+    @staticmethod
+    def _chmod_no_follow(path: str, mode: int) -> None:
+        if os.path.islink(path):
+            return
+        try:
+            os.chmod(path, mode, follow_symlinks=False)
+        except (NotImplementedError, TypeError):
+            os.chmod(path, mode)
+
+    def _success_output_dir_chain(self, root: str, leaf_dir: str) -> List[str]:
+        root_abs = os.path.abspath(root)
+        leaf_abs = os.path.abspath(leaf_dir)
+        if leaf_abs != root_abs and not leaf_abs.startswith(root_abs + os.sep):
+            return [leaf_abs]
+
+        dirs = []
+        current = leaf_abs
+        while True:
+            dirs.append(current)
+            if current == root_abs:
+                break
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+        return list(reversed(dirs))
+
+    def normalize_success_output_dirs(self, root: str, leaf_dir: str) -> None:
+        """Normalize only directories touched by the current result move."""
+        if not self.NORMALIZE_SUCCESS_OUTPUT_MODES:
+            return
+
+        for path in self._success_output_dir_chain(root, leaf_dir):
+            if not os.path.isdir(path) or os.path.islink(path):
+                continue
+            self.chown_path(path)
+            self._chmod_no_follow(path, self.SUCCESS_OUTPUT_DIR_MODE)
+
+    def normalize_success_output_path(self, path: str, raise_on_error: bool = True) -> None:
+        """Normalize only the file or directory produced by the current move."""
+        if not self.NORMALIZE_SUCCESS_OUTPUT_MODES or not path or not os.path.exists(path):
+            return
+
+        errors: List[str] = []
+
+        def chmod_one(target: str, mode: int) -> None:
+            try:
+                self._chmod_no_follow(target, mode)
+            except OSError as e:
+                errors.append(f"{target}: {e}")
+
+        if os.path.isdir(path) and not os.path.islink(path):
+            for current_root, dirs, files in os.walk(path, topdown=False, followlinks=False):
+                for name in files:
+                    chmod_one(os.path.join(current_root, name), self.SUCCESS_OUTPUT_FILE_MODE)
+                for name in dirs:
+                    chmod_one(os.path.join(current_root, name), self.SUCCESS_OUTPUT_DIR_MODE)
+                chmod_one(current_root, self.SUCCESS_OUTPUT_DIR_MODE)
+        else:
+            chmod_one(path, self.SUCCESS_OUTPUT_FILE_MODE)
+
+        if errors:
+            detail = "; ".join(errors[:3])
+            if len(errors) > 3:
+                detail += f"; ... {len(errors) - 3} more"
+            message = f"failed to normalize success output path permissions: {detail}"
+            if raise_on_error:
+                raise PermissionError(message)
+            self.log(f"WARN: {message}")
+
+    def prepare_success_output_tree(self, dst: str) -> None:
+        """Prepare one domain result directory before moving task outputs into it."""
+        os.makedirs(dst, exist_ok=True)
+        self.chown_path(dst)
+        self.normalize_success_output_dirs(dst, dst)
+
+    def ensure_base_dst_writable(self) -> None:
+        """Fail fast when BASE_DST cannot accept result files."""
+        if not self.VERIFY_BASE_DST_WRITABLE_ON_START:
+            return
+
+        base_dst = str(self.BASE_DST or "").strip()
+        if not base_dst:
+            self.log("FATAL: BASE_DST is empty; cannot save capture results.")
+            sys.exit(2)
+
+        try:
+            os.makedirs(base_dst, exist_ok=True)
+            self.chown_path(base_dst)
+        except OSError as e:
+            self.log(f"FATAL: BASE_DST is not writable or cannot be created: {base_dst} -> {e}")
+            sys.exit(2)
+
+        probe_path = os.path.join(base_dst, f".write_test_{os.getpid()}_{threading.get_ident()}")
+        try:
+            with open(probe_path, "w", encoding="utf-8") as probe:
+                probe.write("ok\n")
+            os.unlink(probe_path)
+        except OSError as e:
+            try:
+                if os.path.exists(probe_path):
+                    os.unlink(probe_path)
+            except OSError:
+                pass
+            self.log(f"FATAL: BASE_DST is not writable: {base_dst} -> {e}")
+            sys.exit(2)
+
+        try:
+            self._chmod_no_follow(base_dst, self.SUCCESS_OUTPUT_DIR_MODE)
+        except OSError as e:
+            self.log(f"WARN: cannot chmod BASE_DST to {oct(self.SUCCESS_OUTPUT_DIR_MODE)}: {base_dst} -> {e}")
+
+    def ensure_not_running_with_sudo(self) -> None:
+        """Fail fast when the host scheduler is launched as sudo/root."""
+        if not self.REJECT_SUDO_RUNS_ON_START:
+            return
+
+        sudo_markers = [
+            name for name in ("SUDO_USER", "SUDO_UID", "SUDO_GID")
+            if os.environ.get(name)
+        ]
+        geteuid = getattr(os, "geteuid", None)
+        euid = int(geteuid()) if geteuid is not None else None
+
+        if not sudo_markers and euid != 0:
+            return
+
+        reasons = []
+        if sudo_markers:
+            reasons.append("sudo environment: " + ",".join(sudo_markers))
+        if euid == 0:
+            reasons.append("effective uid is 0")
+        self.log(
+            "FATAL: please run this collector as the normal host user, not via sudo/root. "
+            + "; ".join(reasons)
+        )
+        sys.exit(2)
+
+    def chown_container_result_paths(self, container: str, paths: List[str]) -> None:
+        """Let the host user move files created by root inside the container."""
+        targets: List[str] = []
+        seen = set()
+        container_prefix = f"{self.CONTAINER_CODE_PATH.rstrip('/')}/"
+
+        for raw_path in paths:
+            path = str(raw_path or "").strip()
+            if not path.startswith(container_prefix):
+                continue
+            parent = posixpath.dirname(path)
+            for target in (parent, path):
+                if target and target not in seen:
+                    targets.append(target)
+                    seen.add(target)
+
+        if not targets:
+            return
+
+        owner = f"{self.DEFAULT_UID}:{self.DEFAULT_GID}"
+        cp = self.run_cmd(["docker", "exec", container, "chown", owner, *targets], timeout=60)
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
+            raise PermissionError(
+                f"failed to chown container result paths for host move: "
+                f"container={container} owner={owner} detail={detail}"
+            )
+
+    def move_and_chown(self, src: str, dst_dir: str, result_root: Optional[str] = None) -> str:
         """移动文件并设置所有者"""
         os.makedirs(dst_dir, exist_ok=True)
+        self.chown_path(dst_dir)
+        self.normalize_success_output_dirs(result_root or dst_dir, dst_dir)
         new_path = shutil.move(src, dst_dir)
         self.chown_recursive(new_path)
+        self.normalize_success_output_path(new_path)
         return new_path
 
     # ============== CSV 操作 ==============
@@ -1384,6 +1559,15 @@ class BaseTrafficIngestor(ABC):
         if not all([pcap_path, ssl_key_file_path, content_path, html_path, screenshot_path]):
             return False, self.build_missing_result_paths_error(result, meta_path, required_fields)
 
+        container_result_paths = [
+            pcap_path,
+            ssl_key_file_path,
+            content_path,
+            html_path,
+            screenshot_path,
+        ]
+        self.chown_container_result_paths(container, container_result_paths)
+
         # 转换容器路径为宿主机路径
         pcap_path = pcap_path.replace("/app", self.HOST_CODE_PATH)
         ssl_key_file_path = ssl_key_file_path.replace("/app", self.HOST_CODE_PATH)
@@ -1395,12 +1579,14 @@ class BaseTrafficIngestor(ABC):
         domain = task.get('domain', 'unknown')
         dst = os.path.join(self.BASE_DST, domain)
 
+        self.prepare_success_output_tree(dst)
+
         # 移动文件
-        new_pcap = self.move_and_chown(pcap_path, os.path.join(dst, 'pcap'))
-        new_ssl = self.move_and_chown(ssl_key_file_path, os.path.join(dst, 'ssl_key'))
-        new_content = self.move_and_chown(content_path, os.path.join(dst, 'content'))
-        new_html = self.move_and_chown(html_path, os.path.join(dst, 'html'))
-        new_screenshot = self.move_and_chown(screenshot_path, os.path.join(dst, 'screenshot'))
+        new_pcap = self.move_and_chown(pcap_path, os.path.join(dst, 'pcap'), result_root=dst)
+        new_ssl = self.move_and_chown(ssl_key_file_path, os.path.join(dst, 'ssl_key'), result_root=dst)
+        new_content = self.move_and_chown(content_path, os.path.join(dst, 'content'), result_root=dst)
+        new_html = self.move_and_chown(html_path, os.path.join(dst, 'html'), result_root=dst)
+        new_screenshot = self.move_and_chown(screenshot_path, os.path.join(dst, 'screenshot'), result_root=dst)
 
         extra_saved_paths: Dict[str, str] = {}
         for key, (src_path, dst_subdir) in self.build_additional_result_moves(task, result, dst).items():
@@ -1409,7 +1595,11 @@ class BaseTrafficIngestor(ABC):
             if not os.path.exists(src_path):
                 self.log(f"WARNING: extra result file missing: {key} -> {src_path}")
                 continue
-            extra_saved_paths[key] = self.move_and_chown(src_path, os.path.join(dst, dst_subdir))
+            extra_saved_paths[key] = self.move_and_chown(
+                src_path,
+                os.path.join(dst, dst_subdir),
+                result_root=dst,
+            )
 
         # 调用成功回调
         success_paths = {
@@ -1563,8 +1753,11 @@ class BaseTrafficIngestor(ABC):
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
+        self.ensure_not_running_with_sudo()
+
         # 初始化（子类可覆盖 setup 方法）
         self.setup()
+        self.ensure_base_dst_writable()
         self.disable_host_docker0_offload()
 
         # 准备容器池
