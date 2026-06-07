@@ -85,6 +85,7 @@ class BaseTrafficIngestor(ABC):
     CONTAINER_COUNT: Optional[int] = None
     MAX_DYNAMIC_CONTAINER_COUNT: int = 600
     DYNAMIC_CONTAINER_TASKS_PER_CONTAINER: int = 10
+    DYNAMIC_ONE_CONTAINER_PER_TASK_LIMIT: int = 50
     DOCKER_IMAGE: str = "chuanzhoupan/trace_spider_chrome_148:260522"
     CONTAINER_CODE_PATH: str = "/app"
     CREATE_WITH_TTY: bool = True
@@ -887,7 +888,11 @@ class BaseTrafficIngestor(ABC):
         tasks_per_container = max(int(self.DYNAMIC_CONTAINER_TASKS_PER_CONTAINER), 1)
         max_count = max(int(self.MAX_DYNAMIC_CONTAINER_COUNT), 1)
         task_count = max(int(task_count), 0)
-        dynamic_count = (task_count + tasks_per_container - 1) // tasks_per_container
+        one_per_task_limit = max(int(self.DYNAMIC_ONE_CONTAINER_PER_TASK_LIMIT), 0)
+        base_count = min(task_count, one_per_task_limit)
+        overflow_tasks = max(task_count - one_per_task_limit, 0)
+        overflow_count = (overflow_tasks + tasks_per_container - 1) // tasks_per_container
+        dynamic_count = base_count + overflow_count
         return min(dynamic_count, max_count)
 
     def configure_container_count_for_jobs(self, jobs: List[Dict[str, str]]) -> int:
@@ -898,7 +903,9 @@ class BaseTrafficIngestor(ABC):
         if was_dynamic:
             self.log(
                 f"动态容器数={count}（任务数={len(jobs)}，"
-                f"按每 {self.DYNAMIC_CONTAINER_TASKS_PER_CONTAINER} 个任务向上取整，上限={self.MAX_DYNAMIC_CONTAINER_COUNT}）"
+                f"前 {self.DYNAMIC_ONE_CONTAINER_PER_TASK_LIMIT} 个任务按一任务一容器，"
+                f"之后每 {self.DYNAMIC_CONTAINER_TASKS_PER_CONTAINER} 个任务增加一个容器，"
+                f"上限={self.MAX_DYNAMIC_CONTAINER_COUNT}）"
             )
         else:
             self.log(f"容器数={count}（显式配置）")
@@ -995,6 +1002,77 @@ class BaseTrafficIngestor(ABC):
         return names
 
     # ============== 文件操作 ==============
+    def normalize_host_code_cleanup_permissions(self, base_path: Path) -> bool:
+        """Return temporary HOST_CODE_PATH subdirs to the host user before deletion."""
+        script = r"""
+import os
+import sys
+
+root = sys.argv[1]
+uid = int(sys.argv[2])
+gid = int(sys.argv[3])
+dir_mode = int(sys.argv[4], 8)
+file_mode = int(sys.argv[5], 8)
+skip_names = {"tools"}
+errors = []
+
+def apply(path, mode):
+    try:
+        os.lchown(path, uid, gid)
+    except OSError as exc:
+        errors.append(f"chown {path}: {exc}")
+    if os.path.islink(path):
+        return
+    try:
+        os.chmod(path, mode)
+    except OSError as exc:
+        errors.append(f"chmod {path}: {exc}")
+
+for name in os.listdir(root):
+    if name in skip_names:
+        continue
+    path = os.path.join(root, name)
+    if os.path.islink(path) or not os.path.isdir(path):
+        continue
+    for current_root, dirs, files in os.walk(path, topdown=False, followlinks=False):
+        for file_name in files:
+            apply(os.path.join(current_root, file_name), file_mode)
+        for dir_name in dirs:
+            apply(os.path.join(current_root, dir_name), dir_mode)
+        apply(current_root, dir_mode)
+
+if errors:
+    print("; ".join(errors[:5]), file=sys.stderr)
+    if len(errors) > 5:
+        print(f"... {len(errors) - 5} more permission errors", file=sys.stderr)
+    sys.exit(1)
+"""
+
+        errors: List[str] = []
+        for container in self.build_container_names():
+            if not self.container_running(container):
+                continue
+            cp = self.run_cmd(
+                [
+                    "docker", "exec", "-u", "0:0", container,
+                    "python", "-c", script,
+                    self.CONTAINER_CODE_PATH.rstrip("/") or "/app",
+                    str(self.DEFAULT_UID),
+                    str(self.DEFAULT_GID),
+                    oct(self.SUCCESS_OUTPUT_DIR_MODE),
+                    oct(self.SUCCESS_OUTPUT_FILE_MODE),
+                ],
+                timeout=120,
+            )
+            if cp.returncode == 0:
+                return True
+            detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
+            errors.append(f"{container}: {detail}")
+
+        if errors:
+            self.log(f"WARN: HOST_CODE_PATH cleanup permission normalization failed: {errors[0]}")
+        return False
+
     def clear_host_code_subdirs(self) -> None:
         """清理 HOST_CODE_PATH 下的临时子目录，保留 tools"""
         base_path = self.ensure_host_code_path_ready()
@@ -1002,7 +1080,16 @@ class BaseTrafficIngestor(ABC):
             self.log(f"WARN: HOST_CODE_PATH 不存在或不是目录：{base_path}")
             return
 
-        for entry in base_path.iterdir():
+        entries = [
+            entry for entry in base_path.iterdir()
+            if entry.is_dir() and not entry.is_symlink() and entry.name != 'tools'
+        ]
+        if not entries:
+            return
+
+        self.normalize_host_code_cleanup_permissions(base_path)
+
+        for entry in entries:
             if entry.is_dir() and entry.name != 'tools':
                 try:
                     shutil.rmtree(entry)
@@ -1783,7 +1870,7 @@ class BaseTrafficIngestor(ABC):
 
         return stats
 
-    def run(self) -> None:
+    def run(self) -> bool:
         """主运行入口"""
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -1835,8 +1922,8 @@ class BaseTrafficIngestor(ABC):
                 if not self._runtime_prepared:
                     self.configure_container_count_for_jobs(jobs)
                     self.remove_containers()
-                    self.clear_host_code_subdirs()
                     names = self.prepare_pool_once()
+                    self.clear_host_code_subdirs()
                     self._global_container_count = max(len(names), 1)
                     self._runtime_prepared = True
 
@@ -1882,6 +1969,7 @@ class BaseTrafficIngestor(ABC):
         self.log(f"[最终汇总] 批次={batch_num} | 运行时间={elapsed_min:.1f}分钟 | 总数={total_jobs} | "
                  f"完成={total_done} | 剩余={remaining} | "
                  f"成功={self._global_ok} | 失败={self._global_fail} | 每分钟={per_min:.2f} | 平均耗时={avg_time:.1f}秒")
+        return batch_num > 0
 
     def setup(self) -> None:
         """初始化设置，子类可覆盖"""
@@ -1900,8 +1988,20 @@ class BaseTrafficIngestor(ABC):
         return type(self).setup is not BaseTrafficIngestor.setup
 
     @classmethod
-    def main(cls) -> None:
+    def main(cls) -> bool:
         """入口方法"""
         ingestor = cls()
-        ingestor.run()
-        time.sleep(300)
+        processed_any = ingestor.run()
+        if processed_any:
+            time.sleep(300)
+        return processed_any
+
+    @classmethod
+    def has_pending_jobs(cls) -> bool:
+        """Quickly check whether another outer retry round has work to do."""
+        ingestor = cls()
+        try:
+            return bool(ingestor.fetch_jobs())
+        except Exception as e:
+            ingestor.log(f"WARN: failed to check pending jobs after run: {e}")
+            return True

@@ -78,8 +78,6 @@ class TrafficIngestor(BaseTrafficIngestor):
 
 
 if __name__ == "__main__":
-    TrafficIngestor.main()
-    TrafficIngestor.main()
-    TrafficIngestor.main()
-    TrafficIngestor.main()
-    TrafficIngestor.main()
+    for _ in range(5):
+        if not TrafficIngestor.main():
+            break

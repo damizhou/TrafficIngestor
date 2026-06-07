@@ -10,6 +10,7 @@ import os
 import sys
 from datetime import datetime
 from typing import List, Dict
+import time
 
 # 添加项目根目录到路径
 _current_dir: str = os.path.dirname(os.path.abspath(__file__))
@@ -73,14 +74,15 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     def cleanup(self) -> None:
         """清理容器"""
-        import time
         time.sleep(60)
         self.remove_containers()
 
 
 if __name__ == "__main__":
-    TrafficIngestor.main()
-    TrafficIngestor.main()
-    TrafficIngestor.main()
-    TrafficIngestor.main()
-    TrafficIngestor.main()
+    for i in range(5):
+        if not TrafficIngestor.main():
+            break
+        if i < 4 and TrafficIngestor.has_pending_jobs():
+            time.sleep(1200)
+        else:
+            break
