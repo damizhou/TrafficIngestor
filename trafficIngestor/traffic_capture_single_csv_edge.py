@@ -25,6 +25,8 @@ class TrafficIngestor(BaseTrafficIngestor):
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_edge')
     BASE_DST = '/netdisk2/ww/wiki/0325/edge'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_edge:260309"
+    BROWSER_NAME = "edge"
+    BROWSER_VERSION_COMMANDS = (("microsoft-edge", "--version"),)
     RETRY = 5
 
     CSV_PATH = os.path.join(_project_root, 'small_tools', 'wiki_edge.csv')

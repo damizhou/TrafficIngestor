@@ -24,6 +24,7 @@ from tools.chrome import (
     open_url_and_save_content,
     screenshot_full_page,
 )
+from tools.artifact_naming import build_artifact_filename_stem
 
 
 EDGE_BINARY_PATH = "/usr/bin/microsoft-edge"
@@ -295,7 +296,7 @@ def _resolve_edge_driver():
 
 def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
                        enable_ssl_key_log=True, data_base_dir=None, blocked_hosts=None,
-                       proxy_server=None, proxy_bypass_list=None):
+                       proxy_server=None, proxy_bypass_list=None, artifact_label=None):
     """
     创建Edge浏览器驱动
 
@@ -323,10 +324,15 @@ def create_edge_driver(task_name=None, formatted_time=None, parsers=None,
         ssl_key_dir = os.path.join(data_base_dir, "ssl_key", current_data)
         os.makedirs(ssl_key_dir, exist_ok=True)
 
-        filename_prefix = f'{parsers}_' if parsers else ''
+        filename_stem = build_artifact_filename_stem(
+            parsers,
+            formatted_time,
+            task_name,
+            artifact_label=artifact_label,
+        )
         ssl_key_file_path = os.path.join(
             ssl_key_dir,
-            f"{filename_prefix}{formatted_time}_{task_name}_ssl_key.log"
+            f"{filename_stem}_ssl_key.log"
         )
 
     download_folder = os.path.join(os.getcwd(), 'download')

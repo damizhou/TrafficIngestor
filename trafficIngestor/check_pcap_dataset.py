@@ -9,8 +9,9 @@ check_pcap_dataset.py
 - 每个 domain 目录下应有 10 个不同的 URL（以文件名第一个 _ 前的数字区分）
 - 每个 URL 应有 100 个以上的 pcap 副本（不同时间戳）
 
-文件命名格式：{url_id}_{timestamp}_{domain}.pcap
-例如：1_20251220_22_11_34_numerade.com.pcap
+文件命名格式：{url_id}_{timestamp}_{browser}{browser_major_version}_{domain}.pcap
+兼容旧格式：{url_id}_{timestamp}_{domain}.pcap
+例如：1_20251220_22_11_34_chrome149_numerade.com.pcap
 """
 
 import os
@@ -41,7 +42,7 @@ def parse_pcap_filename(filename: str) -> Tuple[str, str, str]:
     解析 pcap 文件名，提取 url_id、timestamp 和 domain
 
     Args:
-        filename: pcap 文件名，如 1_20251220_22_11_34_numerade.com.pcap
+        filename: pcap 文件名，如 1_20251220_22_11_34_chrome149_numerade.com.pcap
 
     Returns:
         (url_id, timestamp, domain) 或 (None, None, None) 如果解析失败
@@ -60,9 +61,8 @@ def parse_pcap_filename(filename: str) -> Tuple[str, str, str]:
     url_id = parts[0]
     rest = parts[1]
 
-    # 尝试提取 timestamp (格式: YYYYMMDD_HH_MM_SS)
-    # 剩余部分格式: 20251220_22_11_34_numerade.com
-    timestamp_pattern = r'^(\d{8}_\d{2}_\d{2}_\d{2})_(.+)$'
+    # 尝试提取 timestamp (格式: YYYYMMDD_HH_MM_SS)，兼容旧格式和带浏览器版本标识的新格式。
+    timestamp_pattern = r'^(\d{8}_\d{2}_\d{2}_\d{2})_(?:(?:chrome|edge|firefox|chromium)_?\d+_)?(.+)$'
     match = re.match(timestamp_pattern, rest)
 
     if match:

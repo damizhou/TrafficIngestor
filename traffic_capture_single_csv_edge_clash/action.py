@@ -28,7 +28,7 @@ class XCaptureEdgeClashAction(BaseAction):
     def kill_browser_processes(self):
         kill_edge_processes()
 
-    def create_browser_driver(self, formatted_time, row_id):
+    def create_browser_driver(self, formatted_time, row_id, artifact_label=None):
         return create_edge_driver(
             self.allowed_domain,
             formatted_time,
@@ -37,6 +37,7 @@ class XCaptureEdgeClashAction(BaseAction):
             blocked_hosts=self.get_capture_exclude_hosts(),
             proxy_server=self.get_browser_proxy_server(),
             proxy_bypass_list=self.get_browser_proxy_bypass_list(),
+            artifact_label=artifact_label,
         )
 
     def open_and_save_content(self, browser, url, ssl_key_file_path):

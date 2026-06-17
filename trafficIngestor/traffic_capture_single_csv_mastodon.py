@@ -26,7 +26,7 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     # ============== 配置 ==============
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_mastodon')
-    BASE_DST = f'/netdisk/mlj/urls_tls13_hybrid_top100/20260605/'
+    BASE_DST = f'/netdisk/mlj/urls_tls13_hybrid_top100/20260617/'
     RETRY = 5
 
     # CSV 必须包含表头，字段名（大小写不敏感）：

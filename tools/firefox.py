@@ -18,6 +18,8 @@ _project_root: str = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+from tools.artifact_naming import build_artifact_filename_stem
+
 # JavaScript代码：全选并复制页面内容
 JS_SELECT_ALL_AND_COPY_CAPTURE = r"""
 function __select_all_and_copy_capture(){
@@ -213,7 +215,7 @@ def _normalize_no_proxy_list(proxy_bypass_list):
 
 
 def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None,
-                          proxy_server=None, proxy_bypass_list=None):
+                          proxy_server=None, proxy_bypass_list=None, artifact_label=None):
     """
     创建Firefox浏览器驱动
 
@@ -239,10 +241,15 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
     ssl_key_dir = os.path.join(data_base_dir, "ssl_key", current_data)
     os.makedirs(ssl_key_dir, exist_ok=True)
 
-    filename_prefix = f'{parsers}_' if parsers else ''
+    filename_stem = build_artifact_filename_stem(
+        parsers,
+        formatted_time,
+        task_name,
+        artifact_label=artifact_label,
+    )
     ssl_key_file_path = os.path.join(
         ssl_key_dir,
-        f"{filename_prefix}{formatted_time}_{task_name}_ssl_key.log"
+        f"{filename_stem}_ssl_key.log"
     )
 
     # download 目录

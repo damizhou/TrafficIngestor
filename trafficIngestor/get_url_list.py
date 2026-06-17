@@ -43,13 +43,13 @@ from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
 def get_real_username() -> str:
     """获取真实用户名。
 
-    在 sudo 环境下优先读取 SUDO_USER，否则读取 USER 环境变量，
-    最后回退到 os.getlogin()。用于生成容器名前缀。
+    优先读取 USER 环境变量，最后回退到 os.getlogin()。
+    用于生成容器名前缀。
 
     Returns:
         str: 当前登录用户的用户名。
     """
-    return os.environ.get("SUDO_USER") or os.environ.get("USER") or os.getlogin()
+    return os.environ.get("USER") or os.getlogin()
 
 
 # ============== 配置 ==============
@@ -164,10 +164,6 @@ def container_running(name: str) -> bool:
 
 def _safe_uid_gid() -> Tuple[str, str]:
     """安全地获取当前用户的 UID 和 GID。"""
-    uid = os.environ.get("SUDO_UID")
-    gid = os.environ.get("SUDO_GID")
-    if uid and gid:
-        return uid, gid
     try:
         return str(os.getuid()), str(os.getgid())
     except Exception:
@@ -222,11 +218,7 @@ def disable_offload_once(name: str) -> None:
         if [ -f /tmp/.offload_disabled ]; then
             exit 0
         fi
-        if command -v sudo >/dev/null 2>&1; then
-            sudo ethtool -K eth0 tso off gso off gro off
-        else
-            ethtool -K eth0 tso off gso off gro off
-        fi
+        ethtool -K eth0 tso off gso off gro off
         rc=$?
         if [ $rc -eq 0 ]; then
             touch /tmp/.offload_disabled

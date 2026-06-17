@@ -25,6 +25,8 @@ BASE_DST_DATE = datetime.now().strftime("%y%m%d")
 class TrafficIngestor(BaseClashTrafficIngestor):
     BASE_DST = f"/netdisk2/ww/trojan/wiki/260413/edge"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_edge:260309"
+    BROWSER_NAME = "edge"
+    BROWSER_VERSION_COMMANDS = (("microsoft-edge", "--version"),)
     RETRY = 5
     CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_edge.csv")
 

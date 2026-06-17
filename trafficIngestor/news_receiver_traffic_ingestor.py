@@ -41,8 +41,8 @@ if _project_root not in sys.path:
 from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
 
 def get_real_username() -> str:
-    """获取真实用户名，即使在 sudo 下也能获取原始用户"""
-    return os.environ.get('SUDO_USER') or os.environ.get('USER') or os.getlogin()
+    """获取当前登录用户名"""
+    return os.environ.get('USER') or os.getlogin()
 
 # ============== 配置 ==============
 CODE_BASE_PATH = _project_root  # 使用相对路径
@@ -161,17 +161,13 @@ def disable_offload_once(name: str):
     """
     在容器里仅执行一次：关闭包合并（TSO/GSO/GRO）
     使用标记文件 /tmp/.offload_disabled 防重复执行。
-    有 sudo 则 sudo，没有就直接 ethtool。
+    直接使用 ethtool。
     """
     shell = r'''
         if [ -f /tmp/.offload_disabled ]; then
             exit 0
         fi
-        if command -v sudo >/dev/null 2>&1; then
-            sudo ethtool -K eth0 tso off gso off gro off
-        else
-            ethtool -K eth0 tso off gso off gro off
-        fi
+        ethtool -K eth0 tso off gso off gro off
         rc=$?
         if [ $rc -eq 0 ]; then
             touch /tmp/.offload_disabled

@@ -13,6 +13,8 @@ _project_root: str = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+from tools.artifact_naming import build_artifact_filename_stem
+
 # 全局进程变量
 _capture_process = None
 
@@ -30,7 +32,15 @@ def _build_tcpdump_filter_tokens(exclude_hosts=None):
     return filter_tokens
 
 
-def capture(task_name, formatted_time, parsers, data_base_dir=None, logger=None, exclude_hosts=None):
+def capture(
+    task_name,
+    formatted_time,
+    parsers,
+    data_base_dir=None,
+    logger=None,
+    exclude_hosts=None,
+    artifact_label=None,
+):
     """
     启动流量捕获
 
@@ -55,8 +65,13 @@ def capture(task_name, formatted_time, parsers, data_base_dir=None, logger=None,
     data_dir = os.path.join(data_base_dir, "data", current_data)
     os.makedirs(data_dir, exist_ok=True)
 
-    filename_prefix = f'{parsers}_' if parsers else ''
-    traffic_name = os.path.join(data_dir, f"{filename_prefix}{formatted_time}_{task_name}.pcap")
+    filename_stem = build_artifact_filename_stem(
+        parsers,
+        formatted_time,
+        task_name,
+        artifact_label=artifact_label,
+    )
+    traffic_name = os.path.join(data_dir, f"{filename_stem}.pcap")
 
     # 设置tcpdump命令的参数
     tcpdump_command = [
@@ -137,7 +152,7 @@ def kill_tcpdump_processes():
     """清理流量捕获进程"""
     try:
         subprocess.run(
-            ['sudo', 'pkill', '-f', 'tcpdump'],
+            ['pkill', '-f', 'tcpdump'],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE

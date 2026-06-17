@@ -122,7 +122,7 @@ class BaseAction(ABC):
                 time.sleep(1)
         threading.Thread(target=_loop, daemon=True).start()
 
-    def traffic(self, index=0, formatted_time=None):
+    def traffic(self, index=0, formatted_time=None, artifact_label=None):
         """启动流量捕获"""
         capture(
             self.allowed_domain,
@@ -131,13 +131,14 @@ class BaseAction(ABC):
             data_base_dir=_project_root,
             logger=self.logger,
             exclude_hosts=self.get_capture_exclude_hosts(),
+            artifact_label=artifact_label,
         )
 
     def kill_browser_processes(self):
         """清理浏览器进程，子类可覆盖为其他浏览器实现。"""
         kill_chrome_processes()
 
-    def create_browser_driver(self, formatted_time, row_id):
+    def create_browser_driver(self, formatted_time, row_id, artifact_label=None):
         """创建浏览器驱动，子类可覆盖。"""
         return create_chrome_driver(
             self.allowed_domain, formatted_time, f"{row_id}",
@@ -145,6 +146,7 @@ class BaseAction(ABC):
             proxy_server=self.get_browser_proxy_server(),
             proxy_bypass_list=self.get_browser_proxy_bypass_list(),
             logger=self.logger,
+            artifact_label=artifact_label,
         )
 
     def open_and_save_content(self, browser, url, ssl_key_file_path):
@@ -345,11 +347,15 @@ class BaseAction(ABC):
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
 
-    def start_capture_thread(self, row_id, formatted_time):
+    def start_capture_thread(self, row_id, formatted_time, artifact_label=None):
         """启动抓包线程并等待 tcpdump 就绪。"""
         traffic_thread = threading.Thread(
             target=self.traffic,
-            kwargs={"index": row_id, "formatted_time": formatted_time}
+            kwargs={
+                "index": row_id,
+                "formatted_time": formatted_time,
+                "artifact_label": artifact_label,
+            }
         )
         traffic_thread.start()
         time.sleep(1)
@@ -381,6 +387,7 @@ class BaseAction(ABC):
         self.clean_old_files(meta_path)
 
         formatted_time = datetime.now().strftime("%Y%m%d_%H_%M_%S")
+        artifact_label = str(payload.get("browser_label", "") or "").strip()
         self.kill_browser_processes()
         kill_tcpdump_processes()
         time.sleep(1)
@@ -397,7 +404,7 @@ class BaseAction(ABC):
         traffic_thread = None
 
         try:
-            traffic_thread = self.start_capture_thread(row_id, formatted_time)
+            traffic_thread = self.start_capture_thread(row_id, formatted_time, artifact_label)
         except Exception as e:
             open_url_error = repr(e).replace("\n", " ")
             self.logger.error(f"抓包初始化异常: {e}")
@@ -406,7 +413,11 @@ class BaseAction(ABC):
             settle_seconds = max(float(self.get_browser_startup_settle_seconds()), 0.0)
             try:
                 self.logger.info(f"创建{self.browser_name}浏览器")
-                browser, ssl_key_file_path = self.create_browser_driver(formatted_time, row_id)
+                browser, ssl_key_file_path = self.create_browser_driver(
+                    formatted_time,
+                    row_id,
+                    artifact_label,
+                )
                 if settle_seconds > 0:
                     self.logger.info(f"等待{self.browser_name}启动稳定 {settle_seconds:.1f} 秒")
                     time.sleep(settle_seconds)

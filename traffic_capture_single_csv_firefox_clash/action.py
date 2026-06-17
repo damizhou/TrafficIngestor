@@ -28,7 +28,7 @@ class XCaptureFirefoxClashAction(BaseAction):
     def kill_browser_processes(self):
         kill_firefox_processes()
 
-    def create_browser_driver(self, formatted_time, row_id):
+    def create_browser_driver(self, formatted_time, row_id, artifact_label=None):
         return create_firefox_driver(
             self.allowed_domain,
             formatted_time,
@@ -36,6 +36,7 @@ class XCaptureFirefoxClashAction(BaseAction):
             data_base_dir=_current_dir,
             proxy_server=self.get_browser_proxy_server(),
             proxy_bypass_list=self.get_browser_proxy_bypass_list(),
+            artifact_label=artifact_label,
         )
 
     def open_and_save_content(self, browser, url, ssl_key_file_path):

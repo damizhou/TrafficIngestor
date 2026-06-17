@@ -2,12 +2,12 @@
 set -euo pipefail
 
 # Usage:
-#   sudo bash set_nofile_limits.sh [username]
+#   bash set_nofile_limits.sh [username]
 # Optional env vars:
 #   SOFT_LIMIT=65535 HARD_LIMIT=65535 SYS_NR_OPEN=1048576 SYS_FILE_MAX=2097152
 #   ENABLE_DOCKER=1 RESTART_DOCKER=0
 
-TARGET_USER="${1:-${SUDO_USER:-${USER:-pcz}}}"
+TARGET_USER="${1:-${USER:-pcz}}"
 SOFT_LIMIT="${SOFT_LIMIT:-65535}"
 HARD_LIMIT="${HARD_LIMIT:-65535}"
 SYS_NR_OPEN="${SYS_NR_OPEN:-1048576}"
@@ -22,7 +22,7 @@ SYSTEMD_USER_FILE="/etc/systemd/user.conf.d/99-nofile.conf"
 DOCKER_DAEMON_JSON="/etc/docker/daemon.json"
 
 if [[ "$(id -u)" -ne 0 ]]; then
-  echo "ERROR: Please run as root, e.g. sudo bash $0 ${TARGET_USER}"
+  echo "ERROR: Please run as root, e.g. bash $0 ${TARGET_USER}"
   exit 1
 fi
 
@@ -106,7 +106,7 @@ PY
         systemctl restart docker
         echo "Docker restarted"
       else
-        echo "NOTE: Docker not restarted. If needed, run: sudo systemctl restart docker"
+        echo "NOTE: Docker not restarted. If needed, run: systemctl restart docker"
       fi
     else
       echo "WARN: python3 not found, skip docker daemon.json patch"

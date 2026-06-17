@@ -25,6 +25,8 @@ BASE_DST_DATE = datetime.now().strftime("%y%m%d")
 class TrafficIngestor(BaseClashTrafficIngestor):
     BASE_DST = f"/netdisk2/ww/trojan/wiki/260413/firefox"
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"
+    BROWSER_NAME = "firefox"
+    BROWSER_VERSION_COMMANDS = (("firefox", "--version"),)
     RETRY = 5
     CSV_PATH = os.path.join(_project_root, "small_tools", "result", "wiki_firefox.csv")
 

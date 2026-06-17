@@ -26,6 +26,8 @@ _project_root: str = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+from tools.artifact_naming import build_artifact_filename_stem
+
 # JavaScript代码：全选并复制页面内容（模拟 Ctrl+A + Ctrl+C）
 JS_SELECT_ALL_AND_COPY_CAPTURE = r"""
 function __select_all_and_copy_capture(){
@@ -229,7 +231,7 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
                           enable_ssl_key_log=True, data_base_dir=None,
                           proxy_server=None, proxy_bypass_list=None, logger=None,
                           blocked_hosts=None, chrome_binary_path=None,
-                          chromedriver_path=None):
+                          chromedriver_path=None, artifact_label=None):
     """
     创建Chrome浏览器驱动
 
@@ -261,8 +263,13 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
         os.makedirs(ssl_key_dir, exist_ok=True)
         os.makedirs(raw_ssl_key_dir, exist_ok=True)
 
-        filename_prefix = f'{parsers}_' if parsers else ''
-        ssl_key_filename = f"{filename_prefix}{formatted_time}_{task_name}_ssl_key.log"
+        filename_stem = build_artifact_filename_stem(
+            parsers,
+            formatted_time,
+            task_name,
+            artifact_label=artifact_label,
+        )
+        ssl_key_filename = f"{filename_stem}_ssl_key.log"
         ssl_key_file_path = os.path.join(ssl_key_dir, ssl_key_filename)
         raw_ssl_key_file_path = os.path.join(raw_ssl_key_dir, ssl_key_filename)
 

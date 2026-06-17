@@ -104,6 +104,7 @@ def create_ungoogled_chromium_driver(
     blocked_hosts=None,
     chromium_binary_path=None,
     chromedriver_path=None,
+    artifact_label=None,
 ):
     """Create a WebDriver instance backed by ungoogled Chromium."""
     resolved_binary = chromium_binary_path or resolve_ungoogled_chromium_binary()
@@ -128,6 +129,7 @@ def create_ungoogled_chromium_driver(
         blocked_hosts=effective_blocked_hosts,
         chrome_binary_path=resolved_binary,
         chromedriver_path=resolved_driver,
+        artifact_label=artifact_label,
     )
 
 

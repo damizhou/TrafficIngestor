@@ -1,5 +1,7 @@
 # TrafficIngestor
 
+最后更新：2026-06-13 09:17:06
+
 ## 项目简介
 TrafficIngestor 用于批量采集网页访问流量与页面内容。宿主机脚本负责管理 Docker 容器池、分发任务；容器内脚本负责驱动浏览器或 Scrapy 执行访问，并输出抓包文件、TLS 密钥日志、HTML、截图和文本内容。
 
@@ -40,7 +42,7 @@ pip install selenium tqdm psutil scrapy sqlalchemy pymysql
 如果并发容器数较高，建议先执行：
 
 ```bash
-sudo bash set_nofile_limits.sh
+bash set_nofile_limits.sh
 ```
 
 ## 快速开始
@@ -148,6 +150,37 @@ docker network ls --format '{{.Name}}' | grep '^traffic_ingestor_clash' | while 
 done
 ```
 
+### 宿主机网卡 offload 权限
+采集器会在宿主机侧关闭 `docker0`、自定义 Docker bridge 和容器对应 `veth*` 接口的 `TSO/GSO/GRO`，以减少抓包中出现网卡合包带来的分段偏差。典型命令如下：
+
+```bash
+ethtool -K docker0 tso off gso off gro off
+ethtool -K vethxxxx tso off gso off gro off
+```
+
+`ethtool -K` 需要 `CAP_NET_ADMIN`。如果普通用户运行采集器时缺少该能力，可以给宿主机上的 `ethtool` 二进制授予 capability：
+
+```bash
+setcap cap_net_admin+ep "$(command -v ethtool)"
+getcap "$(command -v ethtool)"
+```
+
+期望输出类似：
+
+```bash
+/usr/sbin/ethtool cap_net_admin=ep
+```
+
+`setcap` 写入的是文件 extended attributes，正常情况下重启后仍然生效。以下情况可能导致 capability 丢失：`ethtool` 软件包升级或重装、二进制文件被替换、文件系统不支持或未启用 extended attributes、手动执行 `setcap -r`、系统或镜像快照回滚、安全策略或部署脚本重置文件权限。
+
+取消授权可执行：
+
+```bash
+setcap -r "$(command -v ethtool)"
+```
+
+注意：授予该 capability 后，能执行该 `ethtool` 文件的用户就具备修改网卡 offload 配置的能力。采集器代码会直接执行 `ethtool`，失败时按原错误返回。
+
 ### 数据库采集任务
 数据库模式使用 `db/db_config.ini`。需要提供 `mysql` 配置节，并包含：
 
@@ -172,7 +205,7 @@ python -m py_compile tools\base_action.py tools\chrome.py tools\edge.py tools\fi
 ## 常见注意事项
 
 - 浏览器路径和驱动路径主要写死在 `tools/chrome.py`、`tools/edge.py`、`tools/firefox.py`，更换镜像时要同步检查。
-- 抓包逻辑依赖 `tcpdump` 和 `sudo pkill -f tcpdump`，受限环境中可能失败。
+- 抓包逻辑依赖 `tcpdump` 和 `pkill -f tcpdump`，受限环境中可能失败。
 - 调度脚本会创建和删除当前入口对应的容器池；`trafficIngestor_clash/` 默认按脚本名隔离运行命名空间，避免复制脚本后误删其他任务。
 - 输出目录大量使用 `/netdisk/...` 这类绝对路径，迁移环境时必须先改配置。
 - `db/db_config.ini` 当前属于敏感文件，建议本地维护或改为环境变量注入。

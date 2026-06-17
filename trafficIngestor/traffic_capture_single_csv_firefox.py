@@ -25,6 +25,8 @@ class TrafficIngestor(BaseTrafficIngestor):
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_firefox')
     BASE_DST = '/netdisk2/ww/wiki/0325/firefox'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"
+    BROWSER_NAME = "firefox"
+    BROWSER_VERSION_COMMANDS = (("firefox", "--version"),)
     RETRY = 5
 
     CSV_PATH = os.path.join(_project_root, 'small_tools', 'wiki_firefox.csv')

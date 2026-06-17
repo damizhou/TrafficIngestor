@@ -42,24 +42,18 @@ if _project_root not in sys.path:
 
 
 def get_real_username() -> str:
-    """获取真实用户名，即使在 sudo 下也能获取原始用户"""
-    return os.environ.get('SUDO_USER') or os.environ.get('USER') or os.getlogin()
+    """获取当前登录用户名"""
+    return os.environ.get('USER') or os.getlogin()
 
 
 def get_default_uid() -> int:
     """Return the host uid, with a Windows-safe fallback for import-time defaults."""
-    sudo_uid = os.environ.get('SUDO_UID')
-    if sudo_uid is not None:
-        return int(sudo_uid)
     getuid = getattr(os, "getuid", None)
     return int(getuid()) if getuid is not None else 1000
 
 
 def get_default_gid() -> int:
     """Return the host gid, with a Windows-safe fallback for import-time defaults."""
-    sudo_gid = os.environ.get('SUDO_GID')
-    if sudo_gid is not None:
-        return int(sudo_gid)
     getgid = getattr(os, "getgid", None)
     return int(getgid()) if getgid is not None else 1000
 
@@ -86,7 +80,14 @@ class BaseTrafficIngestor(ABC):
     MAX_DYNAMIC_CONTAINER_COUNT: int = 600
     DYNAMIC_CONTAINER_TASKS_PER_CONTAINER: int = 10
     DYNAMIC_ONE_CONTAINER_PER_TASK_LIMIT: int = 50
-    DOCKER_IMAGE: str = "chuanzhoupan/trace_spider_chrome_148:260522"
+    DOCKER_IMAGE: str = "chuanzhoupan/trace_spider_chrome_149:260611"
+    BROWSER_NAME: str = "chrome"
+    BROWSER_VERSION_COMMANDS: Tuple[Tuple[str, ...], ...] = (
+        ("google-chrome", "--version"),
+        ("google-chrome-stable", "--version"),
+        ("chromium", "--version"),
+        ("chromium-browser", "--version"),
+    )
     CONTAINER_CODE_PATH: str = "/app"
     CREATE_WITH_TTY: bool = True
     DOCKER_EXEC_TIMEOUT: int = 6000
@@ -101,7 +102,6 @@ class BaseTrafficIngestor(ABC):
     DEFAULT_UID: int = get_default_uid()
     DEFAULT_GID: int = get_default_gid()
     CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH: bool = True
-    REJECT_SUDO_RUNS_ON_START: bool = True
     VERIFY_BASE_DST_WRITABLE_ON_START: bool = True
     NORMALIZE_SUCCESS_OUTPUT_MODES: bool = True
     SUCCESS_OUTPUT_DIR_MODE: int = 0o775
@@ -118,6 +118,7 @@ class BaseTrafficIngestor(ABC):
         self._first_exec_next_ts = 0.0
         self._first_exec_done_containers = set()
         self._runtime_prepared = False
+        self._browser_label = ""
 
         # 全局统计
         self._global_start_time = 0.0
@@ -190,6 +191,51 @@ class BaseTrafficIngestor(ABC):
             raw_name = type(self).__name__
         normalized = self.normalize_runtime_name(raw_name, fallback="traffic_ingestor")
         return self.shorten_runtime_name(normalized, max_length=48)
+
+    def parse_browser_version_major(self, version_output: str) -> str:
+        """Extract a browser major version from version command output."""
+        matched = re.search(r"\d+", str(version_output or ""))
+        return matched.group(0) if matched else ""
+
+    def build_browser_artifact_label(self, version_output: str) -> str:
+        """Build the stable artifact label used by all tasks in this run."""
+        browser = self.normalize_runtime_name(self.BROWSER_NAME, fallback="browser").lower()
+        major = self.parse_browser_version_major(version_output)
+        if not browser or not major:
+            raise RuntimeError(
+                f"invalid browser label: browser={self.BROWSER_NAME!r}, version={version_output!r}"
+            )
+        return f"{browser}{major}"
+
+    def detect_browser_label(self, container: str) -> str:
+        """Probe browser version once inside a started container."""
+        attempts: List[str] = []
+        for version_cmd in self.BROWSER_VERSION_COMMANDS:
+            if not version_cmd:
+                continue
+            cmd = ["docker", "exec", container, *version_cmd]
+            cp = self.run_cmd(cmd, timeout=30)
+            output = " ".join(
+                part.strip()
+                for part in (cp.stdout, cp.stderr)
+                if part and part.strip()
+            )
+            if cp.returncode == 0:
+                try:
+                    label = self.build_browser_artifact_label(output)
+                except RuntimeError as e:
+                    attempts.append(f"{' '.join(version_cmd)} -> {e}")
+                    continue
+                self.log(
+                    f"browser version detected: container={container}, "
+                    f"browser={self.BROWSER_NAME}, version={output}, label={label}"
+                )
+                return label
+            attempts.append(f"{' '.join(version_cmd)} -> rc={cp.returncode}, output={output or '<empty>'}")
+
+        detail = " | ".join(attempts) if attempts else "no browser version command configured"
+        self.log(f"FATAL: 浏览器版本探测失败: container={container}, {detail}")
+        sys.exit(2)
 
     def configure_runtime_identity(self) -> None:
         """Populate BASE_NAME / CONTAINER_PREFIX / HOST_CODE_PATH when subclasses omit them."""
@@ -718,11 +764,7 @@ class BaseTrafficIngestor(ABC):
             if [ -f /tmp/.offload_disabled ]; then
                 exit 0
             fi
-            if command -v sudo >/dev/null 2>&1; then
-                sudo ethtool -K eth0 tso off gso off gro off
-            else
-                ethtool -K eth0 tso off gso off gro off
-            fi
+            ethtool -K eth0 tso off gso off gro off
             rc=$?
             if [ $rc -eq 0 ]; then
                 touch /tmp/.offload_disabled
@@ -744,11 +786,7 @@ class BaseTrafficIngestor(ABC):
                 echo "ethtool not found" >&2
                 exit 1
             fi
-            if [ "$(id -u)" -eq 0 ]; then
-                ethtool -K docker0 tso off gso off gro off
-            else
-                sudo ethtool -K docker0 tso off gso off gro off
-            fi
+            ethtool -K docker0 tso off gso off gro off
         '''
         cp = self.run_cmd(["sh", "-lc", shell])
         if cp.returncode != 0:
@@ -784,11 +822,7 @@ class BaseTrafficIngestor(ABC):
                 echo "interface not found: {interface_name}" >&2
                 exit 1
             fi
-            if [ "$(id -u)" -eq 0 ]; then
-                ethtool -K "{interface_name}" tso off gso off gro off
-            else
-                sudo ethtool -K "{interface_name}" tso off gso off gro off
-            fi
+            ethtool -K "{interface_name}" tso off gso off gro off
         '''
         cp = self.run_cmd(["sh", "-lc", shell])
         if cp.returncode != 0:
@@ -999,6 +1033,7 @@ class BaseTrafficIngestor(ABC):
             self.disable_offload_once(n)
             self.disable_host_veth_offload_once(n)
 
+        self._browser_label = self.detect_browser_label(names[0])
         return names
 
     # ============== 文件操作 ==============
@@ -1232,32 +1267,6 @@ if errors:
             self._chmod_no_follow(base_dst, self.SUCCESS_OUTPUT_DIR_MODE)
         except OSError as e:
             self.log(f"WARN: cannot chmod BASE_DST to {oct(self.SUCCESS_OUTPUT_DIR_MODE)}: {base_dst} -> {e}")
-
-    def ensure_not_running_with_sudo(self) -> None:
-        """Fail fast when the host scheduler is launched as sudo/root."""
-        if not self.REJECT_SUDO_RUNS_ON_START:
-            return
-
-        sudo_markers = [
-            name for name in ("SUDO_USER", "SUDO_UID", "SUDO_GID")
-            if os.environ.get(name)
-        ]
-        geteuid = getattr(os, "geteuid", None)
-        euid = int(geteuid()) if geteuid is not None else None
-
-        if not sudo_markers and euid != 0:
-            return
-
-        reasons = []
-        if sudo_markers:
-            reasons.append("sudo environment: " + ",".join(sudo_markers))
-        if euid == 0:
-            reasons.append("effective uid is 0")
-        self.log(
-            "FATAL: please run this collector as the normal host user, not via sudo/root. "
-            + "; ".join(reasons)
-        )
-        sys.exit(2)
 
     def chown_container_result_paths(self, container: str, paths: List[str]) -> None:
         """Let the host user move files created by root inside the container."""
@@ -1568,6 +1577,8 @@ if errors:
         """执行单个任务"""
         container = task["container"]
         self._wait_before_first_exec(container)
+        if self._browser_label:
+            task["browser_label"] = self._browser_label
         payload = json.dumps(task, ensure_ascii=False)
         cmd = [
             "docker", "exec", container,
@@ -1874,8 +1885,6 @@ if errors:
         """主运行入口"""
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
-
-        self.ensure_not_running_with_sudo()
 
         # 初始化（子类可覆盖 setup 方法）
         self.setup()
