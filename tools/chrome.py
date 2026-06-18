@@ -17,6 +17,8 @@ import re
 import tempfile
 import time
 import math
+import queue
+import threading
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -73,6 +75,8 @@ CHROME_BACKGROUND_BLOCKED_HOSTS = (
 )
 MAX_SCREENSHOT_DEVICE_DIMENSION = 16384
 MAX_SCREENSHOT_DEVICE_PIXELS = 60_000_000
+FULL_PAGE_SCREENSHOT_TIMEOUT_SECS = 20
+VIEWPORT_SCREENSHOT_TIMEOUT_SECS = 12
 
 
 def _host_matches_domain(host, domain):
@@ -600,6 +604,37 @@ def _log_warning(logger, message):
         logger.warning(message)
 
 
+def _mark_driver_skip_quit(driver):
+    try:
+        driver._traffic_ingestor_skip_quit = True
+    except Exception:
+        pass
+
+
+def _call_with_worker_timeout(timeout_secs, timeout_message, func):
+    if not timeout_secs:
+        return func()
+
+    result_queue = queue.Queue(maxsize=1)
+
+    def _run():
+        try:
+            result_queue.put(("result", func()))
+        except Exception as e:
+            result_queue.put(("error", e))
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(timeout_secs)
+    if worker.is_alive():
+        raise TimeoutError(timeout_message)
+
+    kind, value = result_queue.get_nowait()
+    if kind == "error":
+        raise value
+    return value
+
+
 def _stop_page_loading(driver, logger, reason):
     try:
         driver.execute_script("window.stop();")
@@ -609,6 +644,7 @@ def _stop_page_loading(driver, logger, reason):
 
 def _load_url_and_wait(driver, url, wait_secs, logger):
     page_load_timeout = max(int(wait_secs or 0), 60)
+    page_loaded = True
     try:
         driver.set_page_load_timeout(page_load_timeout)
     except Exception as e:
@@ -617,6 +653,7 @@ def _load_url_and_wait(driver, url, wait_secs, logger):
     try:
         driver.get(url)
     except TimeoutException as e:
+        page_loaded = False
         _log_warning(
             logger,
             f"页面加载超过{page_load_timeout}秒，停止加载并继续保存已加载内容: {type(e).__name__}: {e}",
@@ -625,6 +662,7 @@ def _load_url_and_wait(driver, url, wait_secs, logger):
     except WebDriverException as e:
         if "Timed out receiving message from renderer" not in str(e):
             raise
+        page_loaded = False
         _log_warning(
             logger,
             f"渲染进程响应超时，停止加载并继续保存已加载内容: {type(e).__name__}: {e}",
@@ -645,23 +683,82 @@ def _load_url_and_wait(driver, url, wait_secs, logger):
             f"页面readyState等待超过{wait_secs}秒，当前状态={ready_state}，停止加载并继续保存已加载内容",
         )
         _stop_page_loading(driver, logger, "页面readyState等待超时")
+        page_loaded = False
+
+    return page_loaded
 
 
-def _save_screenshot_with_fallback(driver, screenshot_path, logger):
+def _save_selenium_viewport_screenshot(driver, viewport_tmp_path, screenshot_path, logger):
     try:
-        screenshot_full_page(driver, Path(screenshot_path), dpr=2.0, logger=logger)
-        return
-    except Exception as full_page_error:
+        saved = _call_with_worker_timeout(
+            VIEWPORT_SCREENSHOT_TIMEOUT_SECS,
+            f"Selenium首屏截图超过{VIEWPORT_SCREENSHOT_TIMEOUT_SECS}秒",
+            lambda: driver.save_screenshot(viewport_tmp_path),
+        )
+        if (
+            saved
+            and os.path.exists(viewport_tmp_path)
+            and os.path.getsize(viewport_tmp_path) > 0
+        ):
+            os.replace(viewport_tmp_path, screenshot_path)
+            return True
+        _log_warning(logger, "Selenium首屏截图失败: driver.save_screenshot returned False")
+    except Exception as selenium_viewport_error:
+        if isinstance(selenium_viewport_error, TimeoutError):
+            _mark_driver_skip_quit(driver)
         _log_warning(
             logger,
-            f"整页截图失败，降级为当前视口截图: {type(full_page_error).__name__}: {full_page_error}",
+            f"Selenium首屏截图失败: {type(selenium_viewport_error).__name__}: {selenium_viewport_error}",
         )
+    finally:
+        try:
+            if os.path.exists(viewport_tmp_path):
+                os.remove(viewport_tmp_path)
+        except OSError as e:
+            _log_warning(logger, f"删除临时视口截图失败: {viewport_tmp_path} -> {e}")
 
-    try:
-        if not driver.save_screenshot(screenshot_path):
-            raise RuntimeError("driver.save_screenshot returned False")
-    except Exception as viewport_error:
-        raise RuntimeError(f"视口截图失败: {viewport_error}") from viewport_error
+    return False
+
+
+def _save_screenshot_with_fallback(driver, screenshot_path, logger, prefer_full_page=True):
+    viewport_tmp_path = f"{screenshot_path}.viewport.tmp"
+    full_page_tmp_path = f"{screenshot_path}.full.tmp"
+
+    if prefer_full_page:
+        try:
+            _call_with_worker_timeout(
+                FULL_PAGE_SCREENSHOT_TIMEOUT_SECS,
+                f"整页截图超过{FULL_PAGE_SCREENSHOT_TIMEOUT_SECS}秒",
+                lambda: screenshot_full_page(driver, Path(full_page_tmp_path), dpr=2.0, logger=logger),
+            )
+            if os.path.exists(full_page_tmp_path) and os.path.getsize(full_page_tmp_path) > 0:
+                os.replace(full_page_tmp_path, screenshot_path)
+                return True
+            _log_warning(logger, "整页截图失败: Page.captureScreenshot returned empty file")
+        except Exception as full_page_error:
+            if isinstance(full_page_error, TimeoutError):
+                _mark_driver_skip_quit(driver)
+                _log_warning(logger, f"整页截图失败: {type(full_page_error).__name__}: {full_page_error}")
+                return False
+            _log_warning(
+                logger,
+                f"整页截图失败，尝试首屏兜底: {type(full_page_error).__name__}: {full_page_error}",
+            )
+        finally:
+            try:
+                if os.path.exists(full_page_tmp_path):
+                    os.remove(full_page_tmp_path)
+            except OSError as e:
+                _log_warning(logger, f"删除临时整页截图失败: {full_page_tmp_path} -> {e}")
+    else:
+        _log_warning(logger, "页面加载未完整完成，跳过CDP截图，直接尝试Selenium首屏截图")
+
+    if _save_selenium_viewport_screenshot(driver, viewport_tmp_path, screenshot_path, logger):
+        return True
+
+    _mark_driver_skip_quit(driver)
+    _log_warning(logger, "截图保存失败，任务将按截图缺失处理")
+    return False
 
 
 def open_url_and_save_content(driver, url, ssl_key_file_path, wait_secs=8,
@@ -686,7 +783,7 @@ def open_url_and_save_content(driver, url, ssl_key_file_path, wait_secs=8,
     if data_base_dir is None:
         data_base_dir = _project_root
 
-    _load_url_and_wait(driver, url, wait_secs, logger)
+    page_loaded = _load_url_and_wait(driver, url, wait_secs, logger)
     time.sleep(15)
 
     script = JS_SELECT_ALL_AND_COPY_CAPTURE + "\nreturn __select_all_and_copy_capture();"
@@ -714,7 +811,7 @@ def open_url_and_save_content(driver, url, ssl_key_file_path, wait_secs=8,
     if save_screenshot:
         screenshot_path = ssl_key_file_path.replace("_ssl_key.log", ".png").replace("/ssl_key/", "/screenshot/")
         os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
-        _save_screenshot_with_fallback(driver, screenshot_path, logger)
+        _save_screenshot_with_fallback(driver, screenshot_path, logger, prefer_full_page=page_loaded)
 
     return content_path, html_path, screenshot_path, current_url
 

@@ -194,6 +194,21 @@ class BaseAction(ABC):
     def use_task_scoped_logger(self):
         return False
 
+    @staticmethod
+    def is_unhealthy_browser_error(error_text):
+        """Return True when further WebDriver calls are likely to hang."""
+        text = error_text or ""
+        return any(
+            marker in text
+            for marker in (
+                "Timed out receiving message from renderer",
+                "TimeoutException",
+                "截图失败",
+                "首屏截图失败",
+                "Page.captureScreenshot",
+            )
+        )
+
     def clean_old_files(self, meta_path):
         """清理旧文件"""
         if os.path.exists(meta_path):
@@ -427,24 +442,33 @@ class BaseAction(ABC):
 
         if browser is not None:
             self.logger.info(f"开始访问第{row_id}的词条：{url}")
+            skip_browser_quit = False
             try:
                 content_path, html_path, screenshot_path, current_url = self.open_and_save_content(
                     browser, url, ssl_key_file_path
                 )
+                skip_browser_quit = bool(getattr(browser, "_traffic_ingestor_skip_quit", False))
                 open_url_error = ""
             except Exception as e:
                 open_url_error = repr(e).replace("\n", " ")
+                skip_browser_quit = self.is_unhealthy_browser_error(open_url_error)
                 self.logger.error(f"open_url_and_save_content 异常: {e}")
-                try:
-                    diagnostic = build_browser_error_diagnostics(browser, url)
-                except Exception as diag_error:
-                    diagnostic = f"collect_diagnostic_failed={type(diag_error).__name__}: {diag_error}"
-                self.logger.error(f"open_url_and_save_content 诊断: {diagnostic}")
+                if skip_browser_quit:
+                    self.logger.error("open_url_and_save_content 诊断: skipped because browser renderer is unhealthy")
+                else:
+                    try:
+                        diagnostic = build_browser_error_diagnostics(browser, url)
+                    except Exception as diag_error:
+                        diagnostic = f"collect_diagnostic_failed={type(diag_error).__name__}: {diag_error}"
+                    self.logger.error(f"open_url_and_save_content 诊断: {diagnostic}")
             finally:
-                try:
-                    browser.quit()
-                except Exception as e:
-                    self.logger.warning(f"browser.quit() 异常: {e}")
+                if skip_browser_quit:
+                    self.logger.warning("跳过 browser.quit()，交由进程兜底清理")
+                else:
+                    try:
+                        browser.quit()
+                    except Exception as e:
+                        self.logger.warning(f"browser.quit() 异常: {e}")
 
         self.logger.info("清理浏览器进程(兜底)")
         self.kill_browser_processes()
