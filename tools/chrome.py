@@ -6,6 +6,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import TimeoutException, WebDriverException
 import os
 import sys
 import base64
@@ -70,6 +71,8 @@ CHROME_BACKGROUND_BLOCKED_HOSTS = (
     "android.clients.google.com",
     "mtalk.google.com",
 )
+MAX_SCREENSHOT_DEVICE_DIMENSION = 16384
+MAX_SCREENSHOT_DEVICE_PIXELS = 60_000_000
 
 
 def _host_matches_domain(host, domain):
@@ -592,6 +595,75 @@ def build_browser_error_diagnostics(driver, requested_url, netlog_path="/tmp/net
     return " | ".join(details)
 
 
+def _log_warning(logger, message):
+    if logger is not None:
+        logger.warning(message)
+
+
+def _stop_page_loading(driver, logger, reason):
+    try:
+        driver.execute_script("window.stop();")
+    except Exception as e:
+        _log_warning(logger, f"{reason}后停止页面加载失败: {type(e).__name__}: {e}")
+
+
+def _load_url_and_wait(driver, url, wait_secs, logger):
+    page_load_timeout = max(int(wait_secs or 0), 60)
+    try:
+        driver.set_page_load_timeout(page_load_timeout)
+    except Exception as e:
+        _log_warning(logger, f"设置页面加载超时失败: {type(e).__name__}: {e}")
+
+    try:
+        driver.get(url)
+    except TimeoutException as e:
+        _log_warning(
+            logger,
+            f"页面加载超过{page_load_timeout}秒，停止加载并继续保存已加载内容: {type(e).__name__}: {e}",
+        )
+        _stop_page_loading(driver, logger, "页面加载超时")
+    except WebDriverException as e:
+        if "Timed out receiving message from renderer" not in str(e):
+            raise
+        _log_warning(
+            logger,
+            f"渲染进程响应超时，停止加载并继续保存已加载内容: {type(e).__name__}: {e}",
+        )
+        _stop_page_loading(driver, logger, "渲染进程响应超时")
+
+    try:
+        WebDriverWait(driver, wait_secs).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+    except TimeoutException:
+        try:
+            ready_state = driver.execute_script("return document.readyState")
+        except Exception as e:
+            ready_state = f"unknown({type(e).__name__}: {e})"
+        _log_warning(
+            logger,
+            f"页面readyState等待超过{wait_secs}秒，当前状态={ready_state}，停止加载并继续保存已加载内容",
+        )
+        _stop_page_loading(driver, logger, "页面readyState等待超时")
+
+
+def _save_screenshot_with_fallback(driver, screenshot_path, logger):
+    try:
+        screenshot_full_page(driver, Path(screenshot_path), dpr=2.0, logger=logger)
+        return
+    except Exception as full_page_error:
+        _log_warning(
+            logger,
+            f"整页截图失败，降级为当前视口截图: {type(full_page_error).__name__}: {full_page_error}",
+        )
+
+    try:
+        if not driver.save_screenshot(screenshot_path):
+            raise RuntimeError("driver.save_screenshot returned False")
+    except Exception as viewport_error:
+        raise RuntimeError(f"视口截图失败: {viewport_error}") from viewport_error
+
+
 def open_url_and_save_content(driver, url, ssl_key_file_path, wait_secs=8,
                                save_screenshot=True, data_base_dir=None, logger=None):
     """
@@ -614,17 +686,8 @@ def open_url_and_save_content(driver, url, ssl_key_file_path, wait_secs=8,
     if data_base_dir is None:
         data_base_dir = _project_root
 
-    driver.get(url)
-    WebDriverWait(driver, wait_secs).until(
-        lambda d: d.execute_script("return document.readyState") == "complete"
-    )
+    _load_url_and_wait(driver, url, wait_secs, logger)
     time.sleep(15)
-
-    screenshot_path = None
-    if save_screenshot:
-        screenshot_path = ssl_key_file_path.replace("_ssl_key.log", ".png").replace("/ssl_key/", "/screenshot/")
-        os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
-        screenshot_full_page(driver, Path(screenshot_path), dpr=2.0)
 
     script = JS_SELECT_ALL_AND_COPY_CAPTURE + "\nreturn __select_all_and_copy_capture();"
     res = driver.execute_script(script)
@@ -647,12 +710,19 @@ def open_url_and_save_content(driver, url, ssl_key_file_path, wait_secs=8,
     # 获取重定向后的真实URL
     current_url = driver.current_url
 
+    screenshot_path = None
+    if save_screenshot:
+        screenshot_path = ssl_key_file_path.replace("_ssl_key.log", ".png").replace("/ssl_key/", "/screenshot/")
+        os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
+        _save_screenshot_with_fallback(driver, screenshot_path, logger)
+
     return content_path, html_path, screenshot_path, current_url
 
 
-def screenshot_full_page(driver: webdriver.Chrome, out_path: Path, dpr: Optional[float] = None) -> None:
+def screenshot_full_page(driver: webdriver.Chrome, out_path: Path, dpr: Optional[float] = None,
+                         logger=None) -> None:
     """
-    整页长截图：通过 CDP 获取内容尺寸并原生捕获，不做滚动拼接。
+    整页长截图：通过 CDP 获取内容尺寸并原生捕获，超出浏览器限制时截取可保存区域。
 
     Args:
         driver: WebDriver实例
@@ -677,26 +747,56 @@ def screenshot_full_page(driver: webdriver.Chrome, out_path: Path, dpr: Optional
         ))
 
     device_scale = float(dpr) if dpr and dpr > 0 else 1.0
+    max_css_width = max(1, int(MAX_SCREENSHOT_DEVICE_DIMENSION / device_scale))
+    capture_width = min(width, max_css_width)
+    max_css_height_by_dimension = max(1, int(MAX_SCREENSHOT_DEVICE_DIMENSION / device_scale))
+    max_css_height_by_pixels = max(
+        1,
+        int(MAX_SCREENSHOT_DEVICE_PIXELS / max(capture_width * device_scale * device_scale, 1.0)),
+    )
+    capture_height = min(height, max_css_height_by_dimension, max_css_height_by_pixels)
 
-    # 覆盖设备度量，扩大视窗到整页尺寸
-    driver.execute_cdp_cmd("Emulation.setDeviceMetricsOverride", {
-        "mobile": False,
-        "width": width,
-        "height": height,
-        "deviceScaleFactor": device_scale,
-        "screenOrientation": {"type": "landscapePrimary", "angle": 0},
-    })
+    if capture_width != width or capture_height != height:
+        _log_warning(
+            logger,
+            "整页截图尺寸超过Chrome限制，"
+            f"从 {width}x{height}@{device_scale:g} 截断为 {capture_width}x{capture_height}@{device_scale:g}",
+        )
 
-    # 捕获位图（b64）
-    data = driver.execute_cdp_cmd("Page.captureScreenshot", {
-        "fromSurface": True,
-        "captureBeyondViewport": True
-    })
-    png_b64 = data.get("data")
-    out_path.write_bytes(base64.b64decode(png_b64))
+    metrics_overridden = False
+    try:
+        # 覆盖设备度量，扩大视窗到待截图区域
+        driver.execute_cdp_cmd("Emulation.setDeviceMetricsOverride", {
+            "mobile": False,
+            "width": capture_width,
+            "height": capture_height,
+            "deviceScaleFactor": device_scale,
+            "screenOrientation": {"type": "landscapePrimary", "angle": 0},
+        })
+        metrics_overridden = True
 
-    # 恢复度量，避免影响后续操作
-    driver.execute_cdp_cmd("Emulation.clearDeviceMetricsOverride", {})
+        # 捕获位图（b64）
+        data = driver.execute_cdp_cmd("Page.captureScreenshot", {
+            "fromSurface": True,
+            "captureBeyondViewport": True,
+            "clip": {
+                "x": 0,
+                "y": 0,
+                "width": capture_width,
+                "height": capture_height,
+                "scale": 1,
+            },
+        })
+        png_b64 = data.get("data")
+        if not png_b64:
+            raise RuntimeError("Page.captureScreenshot returned no data")
+        out_path.write_bytes(base64.b64decode(png_b64))
+    finally:
+        if metrics_overridden:
+            try:
+                driver.execute_cdp_cmd("Emulation.clearDeviceMetricsOverride", {})
+            except Exception as e:
+                _log_warning(logger, f"恢复Chrome设备度量失败: {type(e).__name__}: {e}")
 
 
 def kill_chrome_processes():
