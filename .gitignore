@@ -7,3 +7,4 @@ small_tools/origin
 temp/
 config/
 .vscode/
+/REMOTE_SERVER_ACCESS.md
