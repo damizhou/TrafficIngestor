@@ -272,6 +272,9 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
     # --- 传输层：启 HTTP/3/QUIC/Alt-Svc + 禁 DoH ---
     # opts.set_preference("security.tls.version.min", 4)  # TLS1.3
     # opts.set_preference("security.tls.version.max", 4)
+    # Firefox 仍使用 kyber 命名控制 ML-KEM 混合密钥交换。
+    # opts.set_preference("security.tls.enable_kyber", False)
+    # opts.set_preference("network.http.http3.enable_kyber", False)
     opts.set_preference("network.http.http3.enabled", True)
     opts.set_preference("network.http.altsvc.enabled", True)
     opts.set_preference("network.trr.mode", 5)  # 禁 DoH

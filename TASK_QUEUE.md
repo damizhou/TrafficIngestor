@@ -117,3 +117,6 @@
 - [x] 已完成并验证：修复 Chrome 页面加载超时、整页截图过大和 CDP/Selenium 截图卡住导致内容产物缺失 - 2026-06-18 13:15:27
 - [x] 已完成并验证：记录远程服务器 SSH key/sshpass 连接流程并补充本地密钥文件忽略规则 - 2026-06-18 13:56:22
 - [x] 已完成并验证：恢复 Firefox HTTP/3/QUIC 与 Alt-Svc 开关 - 2026-06-24 19:58:36
+- [x] 已完成并验证：新增 Docker 启动后关闭 docker0 offload 的 systemd oneshot 安装脚本并在远程服务器通过 bash 语法校验 - 2026-06-24 20:26:05
+- [x] 已完成并验证：新增永久提升 nofile soft/hard 到最大值的安装脚本并同步到远程服务器通过 bash 语法校验 - 2026-06-24 20:37:51
+- [x] 已完成并验证：禁用 Firefox 的 ML-KEM/TLS hybrid key share preference - 2026-06-24 20:44:49
