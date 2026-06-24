@@ -269,11 +269,11 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
     opts.add_argument("-headless")
     opts.add_argument("-private")
 
-    # --- 传输层：TLS1.2 + 禁 HTTP/3/Alt-Svc + 禁 DoH ---
+    # --- 传输层：启 HTTP/3/QUIC/Alt-Svc + 禁 DoH ---
     # opts.set_preference("security.tls.version.min", 4)  # TLS1.3
     # opts.set_preference("security.tls.version.max", 4)
-    opts.set_preference("network.http.http3.enabled", False)
-    opts.set_preference("network.http.altsvc.enabled", False)
+    opts.set_preference("network.http.http3.enabled", True)
+    opts.set_preference("network.http.altsvc.enabled", True)
     opts.set_preference("network.trr.mode", 5)  # 禁 DoH
     opts.set_preference("network.trr.uri", "")
     opts.set_preference("security.OCSP.enabled", 0)
