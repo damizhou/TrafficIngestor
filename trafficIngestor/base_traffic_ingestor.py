@@ -759,17 +759,10 @@ class BaseTrafficIngestor(ABC):
         self.log(f"started container: {name}")
 
     def disable_offload_once(self, name: str) -> None:
-        """关闭容器的包合并（TSO/GSO/GRO），仅执行一次"""
+        """关闭容器的包合并（TSO/GSO/GRO），每次启动后都强制执行"""
         shell = r'''
-            if [ -f /tmp/.offload_disabled ]; then
-                exit 0
-            fi
             ethtool -K eth0 tso off gso off gro off
-            rc=$?
-            if [ $rc -eq 0 ]; then
-                touch /tmp/.offload_disabled
-            fi
-            exit $rc
+            exit $?
         '''
         cp = self.run_cmd(["docker", "exec", name, "sh", "-lc", shell])
         if cp.returncode == 0:

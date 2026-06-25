@@ -121,3 +121,4 @@
 - [x] 已完成并验证：新增永久提升 nofile soft/hard 到最大值的安装脚本并同步到远程服务器通过 bash 语法校验 - 2026-06-24 20:37:51
 - [x] 已完成并验证：禁用 Firefox 的 ML-KEM/TLS hybrid key share preference - 2026-06-24 20:44:49
 - [x] 已完成并验证：移除采集代码中宿主机 docker0 offload 关闭逻辑，改由 systemd oneshot 处理 - 2026-06-25 09:25:00
+- [x] 已完成并验证：让容器内 eth0 每次启动后都强制执行 ethtool 关闭 TSO/GSO/GRO，去掉 /tmp/.offload_disabled 跳过逻辑 - 2026-06-25 10:45:53
