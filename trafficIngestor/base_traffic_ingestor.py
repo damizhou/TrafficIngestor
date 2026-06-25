@@ -101,7 +101,7 @@ class BaseTrafficIngestor(ABC):
     DOCKER_NETWORK_ATTACHMENT_WARN_THRESHOLD: Optional[int] = 900
     DEFAULT_UID: int = get_default_uid()
     DEFAULT_GID: int = get_default_gid()
-    CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH: bool = True
+    CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH: bool = False
     VERIFY_BASE_DST_WRITABLE_ON_START: bool = True
     NORMALIZE_SUCCESS_OUTPUT_MODES: bool = True
     SUCCESS_OUTPUT_DIR_MODE: int = 0o775
@@ -1929,6 +1929,7 @@ if errors:
                             f"err={self.compact_error(err, limit=1000)}"
                         )
 
+                # 默认只在启动容器池后清理上一次残留；批次结束后保留本次现场用于排查失败。
                 if self.CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH:
                     self.clear_host_code_subdirs()
 
