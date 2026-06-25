@@ -778,23 +778,6 @@ class BaseTrafficIngestor(ABC):
             msg = (cp.stderr or cp.stdout).strip()
             self.log(f"WARN: {name}: 关闭包合并失败：{msg if msg else 'unknown error'}")
 
-    def disable_host_docker0_offload(self) -> None:
-        """每次运行前关闭宿主机 docker0 的 TSO/GSO/GRO。"""
-        shell = r'''
-            set -e
-            if ! command -v ethtool >/dev/null 2>&1; then
-                echo "ethtool not found" >&2
-                exit 1
-            fi
-            ethtool -K docker0 tso off gso off gro off
-        '''
-        cp = self.run_cmd(["sh", "-lc", shell])
-        if cp.returncode != 0:
-            detail = (cp.stderr or cp.stdout).strip() or "unknown error"
-            self.log(f"FATAL: failed to disable docker0 offload: {detail}")
-            sys.exit(2)
-        self.log("docker0: offload disabled (TSO/GSO/GRO off)")
-
     def get_target_bridge_interface(self) -> Optional[str]:
         """Return the host bridge interface name for the target Docker network."""
         network_name = self.get_target_docker_network()
@@ -837,8 +820,12 @@ class BaseTrafficIngestor(ABC):
 
     def disable_target_bridge_offload(self) -> None:
         """Disable offload on the host bridge backing the current Docker network."""
-        interface_name = self.get_target_bridge_interface()
         network_name = self.get_target_docker_network()
+        if network_name == "bridge":
+            self.log("skip docker0 offload disable; managed by systemd service")
+            return
+
+        interface_name = self.get_target_bridge_interface()
         if not interface_name:
             self.log(f"FATAL: failed to resolve bridge interface for docker network {network_name}")
             sys.exit(2)
@@ -1889,7 +1876,6 @@ if errors:
         # 初始化（子类可覆盖 setup 方法）
         self.setup()
         self.ensure_base_dst_writable()
-        self.disable_host_docker0_offload()
 
         # 准备容器池
         names: List[str] = []

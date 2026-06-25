@@ -1,6 +1,6 @@
 # TrafficIngestor
 
-最后更新：2026-06-13 09:17:06
+最后更新：2026-06-25 09:24:57
 
 ## 项目简介
 TrafficIngestor 用于批量采集网页访问流量与页面内容。宿主机脚本负责管理 Docker 容器池、分发任务；容器内脚本负责驱动浏览器或 Scrapy 执行访问，并输出抓包文件、TLS 密钥日志、HTML、截图和文本内容。
@@ -151,10 +151,9 @@ done
 ```
 
 ### 宿主机网卡 offload 权限
-采集器会在宿主机侧关闭 `docker0`、自定义 Docker bridge 和容器对应 `veth*` 接口的 `TSO/GSO/GRO`，以减少抓包中出现网卡合包带来的分段偏差。典型命令如下：
+`docker0` 的 `TSO/GSO/GRO` 由 `small_tools/install_disable_docker0_offload_service.sh` 安装的 systemd oneshot 服务在 Docker 启动后关闭。采集器运行时只处理自定义 Docker bridge 和容器对应 `veth*` 接口，以减少抓包中出现网卡合包带来的分段偏差。典型命令如下：
 
 ```bash
-ethtool -K docker0 tso off gso off gro off
 ethtool -K vethxxxx tso off gso off gro off
 ```
 
