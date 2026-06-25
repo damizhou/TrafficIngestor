@@ -1,3 +1,24 @@
+# 任务队列
+
+最后更新：2026-06-25 21:16:11
+
+- [x] 已完成并验证：在 BASE_DST/logs 中生成含完整度结果的单次执行任务生命周期日志 - 2026-06-25 21:16:11
+
+- [x] 已完成并验证：任务结束后使用 BASE_DST 中的 CSV 校验五类产物完整度 - 2026-06-25 21:12:35
+
+- [x] 已完成并验证：启动采集时将任务 CSV 复制到 BASE_DST 根目录且不覆盖已有文件 - 2026-06-25 21:08:27
+
+- [x] 已完成并验证：为同 ID 任务增加 2 秒启动间隔 - 2026-06-25 20:46:39
+
+- [x] 已完成并验证：修复并发重入导致 PCAP 损坏和 SSL key 孤儿产物，保持原有秒级产物命名 - 2026-06-25 20:20:44
+
+- [x] 已完成并验证：调整 GitHub 仓库 CSV 映射为原始 id、html_url 和固定 github.com - 2026-06-25 16:17:12
+
+- [x] 已完成并验证：修正 GitHub 仓库 CSV 转换脚本，输出 id 使用源数据 repo_id - 2026-06-25 16:06:26
+
+- [x] 已完成并验证：批量将 5 个社交平台 URL 文本转换为 `id,url,domain` CSV - 2026-06-25 15:40:18
+- [x] 已完成并验证：将 GitHub 仓库 CSV 转换为 `id,url,domain` 格式 - 2026-06-25 15:37:24
+
 - [x] 已完成并验证：新�?`temp/servers_txt_to_sever_info.py`，将 `temp/servers.txt` 转成 `vpns_info` Python 配置格式 - 2026-03-27 14:20
 - [x] 已完成并验证：参�?`temp` 中旧 VPN 方案调整 `traffic_capture_single_csv_clash.py` �?Clash 启动时机 - 2026-03-27 11:18
 - [x] 已完成并验证：为 `trafficIngestor/traffic_capture_single_csv_clash.py` 增加 clash-for-linux 挂载、启动和代理采集支持 - 2026-03-27 11:12

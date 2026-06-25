@@ -26,6 +26,7 @@ from tools.chrome import (
     open_url_and_save_content,
 )
 from tools.logger import setup_logging
+from tools.pcap_validation import validate_pcap_structure
 
 
 class TaskScopedLogger:
@@ -106,6 +107,7 @@ class BaseAction(ABC):
         self.allowed_domain = ""
         self.container_name = ""
         self.logger = None  # 延迟初始化，等获取到容器名称后再设置
+        self._last_pcap_validation_error = ""
         self._start_reaper()
 
     def _start_reaper(self):
@@ -276,6 +278,8 @@ class BaseAction(ABC):
             reasons.append("page_not_found")
         if open_url_error:
             reasons.append(f"open_url_error={open_url_error[:300]}")
+        if self._last_pcap_validation_error:
+            reasons.append(f"pcap_invalid={self._last_pcap_validation_error[:300]}")
 
         pcap = path_diagnostics["pcap_path"]
         ssl_key = path_diagnostics["ssl_key_file_path"]
@@ -328,7 +332,15 @@ class BaseAction(ABC):
 
         pcap_file_size = os.path.getsize(pcap_path)
         ssl_key_file_size = os.path.getsize(ssl_key_file_path)
-        pcap_ok = pcap_file_size > self.pcap_lowest_size
+        self._last_pcap_validation_error = ""
+        pcap_structure_ok = False
+        if pcap_file_size > self.pcap_lowest_size:
+            pcap_structure_ok, self._last_pcap_validation_error = validate_pcap_structure(
+                pcap_path
+            )
+            if not pcap_structure_ok:
+                self.logger.warning(f"pcap结构校验失败: {self._last_pcap_validation_error}")
+        pcap_ok = pcap_file_size > self.pcap_lowest_size and pcap_structure_ok
         ssl_ok = ssl_key_file_size > self.ssl_key_lowest_size
 
         self.logger.info(f"pcap文件大小：{pcap_file_size}，ssl_key文件大小：{ssl_key_file_size}")
@@ -338,7 +350,8 @@ class BaseAction(ABC):
 
         self.logger.info(
             "校验详情: "
-            f"pcap_ok={pcap_ok}({pcap_file_size}>{self.pcap_lowest_size}), "
+            f"pcap_ok={pcap_ok}({pcap_file_size}>{self.pcap_lowest_size}, "
+            f"structure_ok={pcap_structure_ok}), "
             f"ssl_key_ok={ssl_ok}({ssl_key_file_size}>{self.ssl_key_lowest_size}), "
             f"content_exists={content_exists}, html_exists={html_exists}"
         )

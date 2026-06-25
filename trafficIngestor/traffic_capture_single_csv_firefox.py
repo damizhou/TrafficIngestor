@@ -23,7 +23,8 @@ class TrafficIngestor(BaseTrafficIngestor):
     """Firefox 流量采集器"""
 
     HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_firefox')
-    BASE_DST = '/netdisk/mlj/20260624/temp_disableML-KEM'
+    # BASE_DST = '/netdisk/mlj/20260625/temp'
+    BASE_DST = '/netdisk/mlj/20260625/temp_disableML-KEM'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"
     BROWSER_NAME = "firefox"
     BROWSER_VERSION_COMMANDS = (("firefox", "--version"),)
@@ -47,19 +48,20 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     def on_task_success(self, task: Dict[str, str], paths: Dict[str, str]) -> None:
         """任务成功后从 CSV 删除记录"""
-        row_id = task.get("row_id", "")
-        if row_id:
-            try:
-                self.remove_first_matching_row_from_csv(
-                    self.CSV_PATH,
-                    {
-                        "id": task.get("row_id", ""),
-                        "url": task.get("url", ""),
-                        "domain": task.get("domain", ""),
-                    },
-                )
-            except Exception as e:
-                self.log(f"ERROR: 删除 CSV 记录失败: {e}")
+        pass
+        # row_id = task.get("row_id", "")
+        # if row_id:
+        #     try:
+        #         self.remove_first_matching_row_from_csv(
+        #             self.CSV_PATH,
+        #             {
+        #                 "id": task.get("row_id", ""),
+        #                 "url": task.get("url", ""),
+        #                 "domain": task.get("domain", ""),
+        #             },
+        #         )
+        #     except Exception as e:
+        #         self.log(f"ERROR: 删除 CSV 记录失败: {e}")
 
     def should_continue(self) -> bool:
         """只运行一次"""

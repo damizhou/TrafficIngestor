@@ -25,6 +25,7 @@ import shutil
 import threading
 import tempfile
 from abc import ABC, abstractmethod
+from collections import Counter
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Any
 from concurrent.futures import ThreadPoolExecutor
@@ -93,6 +94,7 @@ class BaseTrafficIngestor(ABC):
     DOCKER_EXEC_TIMEOUT: int = 6000
     RETRY: int = 5
     FIRST_EXEC_INTERVAL: float = 1.0
+    SAME_ID_EXEC_INTERVAL: float = 2.0
     DOCKER_NETWORK: Optional[str] = None
     CONTAINER_IP_START: Optional[str] = None
     DOCKER_DNS: Optional[str] = None
@@ -117,8 +119,16 @@ class BaseTrafficIngestor(ABC):
         self._first_exec_lock = threading.Lock()
         self._first_exec_next_ts = 0.0
         self._first_exec_done_containers = set()
+        self._same_id_exec_lock = threading.Lock()
+        self._same_id_next_ts: Dict[str, float] = {}
         self._runtime_prepared = False
         self._browser_label = ""
+        self._runtime_lock_handle = None
+        self._runtime_lock_path = ""
+        self._copied_task_csv_path = ""
+        self._execution_task_log_lock = threading.Lock()
+        self._execution_task_log_path = ""
+        self._execution_task_sequence = 0
 
         # 全局统计
         self._global_start_time = 0.0
@@ -136,6 +146,91 @@ class BaseTrafficIngestor(ABC):
             tqdm.write(msg)
         else:
             print(msg, flush=True)
+
+    def initialize_execution_task_log(self) -> Optional[str]:
+        """Create one concise task lifecycle log for the current execution."""
+        csv_path = str(getattr(self, "CSV_PATH", "") or "").strip()
+        if not csv_path:
+            return None
+
+        logs_dir = os.path.join(os.path.abspath(str(self.BASE_DST)), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        self.chown_path(logs_dir)
+        self.normalize_success_output_dirs(str(self.BASE_DST), logs_dir)
+
+        timestamp = time.strftime("%Y%m%d_%H_%M_%S")
+        csv_name = os.path.basename(csv_path)
+        base_name = f"{timestamp}_{csv_name}"
+        candidate = os.path.join(logs_dir, f"{base_name}.log")
+        sequence = 1
+        while True:
+            try:
+                with open(candidate, "x", encoding="utf-8"):
+                    pass
+                break
+            except FileExistsError:
+                sequence += 1
+                candidate = os.path.join(logs_dir, f"{base_name}_{sequence}.log")
+
+        self.chown_path(candidate)
+        self.normalize_success_output_path(candidate)
+        self._execution_task_log_path = candidate
+        self._write_execution_task_log(
+            "run_start",
+            base_dst=os.path.abspath(str(self.BASE_DST)),
+            csv_path=os.path.abspath(csv_path),
+        )
+        self.log(f"任务执行日志: {candidate}")
+        return candidate
+
+    def _write_execution_task_log(self, event: str, **fields: Any) -> None:
+        """Append one JSON event to the current execution task log."""
+        if not self._execution_task_log_path:
+            return
+
+        record = {
+            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "event": event,
+        }
+        record.update(fields)
+        line = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+        with self._execution_task_log_lock:
+            with open(self._execution_task_log_path, "a", encoding="utf-8") as log_file:
+                log_file.write(line)
+                log_file.write("\n")
+                log_file.flush()
+
+    def _write_task_start_log(self, task: Dict[str, Any]) -> None:
+        self._write_execution_task_log(
+            "task_start",
+            task_no=task.get("_task_log_no", 0),
+            id=task.get("row_id", ""),
+            url=task.get("url", ""),
+            domain=task.get("domain", ""),
+            container=task.get("container", ""),
+        )
+
+    def _write_task_end_log(
+        self,
+        task: Dict[str, Any],
+        *,
+        success: bool,
+        elapsed: float,
+        error: str = "",
+    ) -> None:
+        record = {
+            "task_no": task.get("_task_log_no", 0),
+            "id": task.get("row_id", ""),
+            "url": task.get("url", ""),
+            "domain": task.get("domain", ""),
+            "container": task.get("container", ""),
+            "status": "success" if success else "failed",
+            "attempts": int(task.get("_retry_count", 0)) + 1,
+            "elapsed_seconds": round(elapsed, 3),
+        }
+        if error:
+            record["error"] = self.compact_error(error, limit=1000)
+        self._write_execution_task_log("task_end", **record)
 
     @staticmethod
     def compact_error(error: Any, limit: int = 1600) -> str:
@@ -244,6 +339,50 @@ class BaseTrafficIngestor(ABC):
         self.CONTAINER_PREFIX = f"{get_real_username()}_{runtime_name}"
         if not self.HOST_CODE_PATH:
             self.HOST_CODE_PATH = os.path.join(_project_root, runtime_name)
+
+    def acquire_runtime_lock(self) -> None:
+        """Reject a second collector process using the same runtime namespace."""
+        if os.name != "posix":
+            return
+
+        import fcntl
+
+        lock_path = Path("/tmp") / f"traffic_ingestor_{self.BASE_NAME}.lock"
+        lock_handle = lock_path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as e:
+            lock_handle.seek(0)
+            owner = lock_handle.read().strip() or "owner metadata unavailable"
+            lock_handle.close()
+            raise RuntimeError(
+                f"runtime already active: namespace={self.BASE_NAME}, "
+                f"lock={lock_path}, owner={owner}"
+            ) from e
+
+        lock_handle.seek(0)
+        lock_handle.truncate()
+        lock_handle.write(
+            f"pid={os.getpid()} started={time.strftime('%Y-%m-%d %H:%M:%S')} "
+            f"argv={' '.join(sys.argv)}\n"
+        )
+        lock_handle.flush()
+        self._runtime_lock_handle = lock_handle
+        self._runtime_lock_path = str(lock_path)
+        self.log(f"runtime lock acquired: {lock_path}")
+
+    def release_runtime_lock(self) -> None:
+        """Release the current runtime namespace lock."""
+        lock_handle = self._runtime_lock_handle
+        if lock_handle is None:
+            return
+
+        if os.name == "posix":
+            import fcntl
+
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        lock_handle.close()
+        self._runtime_lock_handle = None
 
     # ============== Docker 容器管理 ==============
     def ensure_docker_available(self) -> None:
@@ -1248,6 +1387,207 @@ if errors:
         except OSError as e:
             self.log(f"WARN: cannot chmod BASE_DST to {oct(self.SUCCESS_OUTPUT_DIR_MODE)}: {base_dst} -> {e}")
 
+    def copy_task_csv_to_base_dst(self) -> Optional[str]:
+        """Copy CSV_PATH to the BASE_DST root once without overwriting it."""
+        csv_path = str(getattr(self, "CSV_PATH", "") or "").strip()
+        if not csv_path:
+            return None
+
+        source_path = os.path.abspath(csv_path)
+        if not os.path.isfile(source_path):
+            raise FileNotFoundError(f"task CSV does not exist: {source_path}")
+
+        base_dst = os.path.abspath(str(self.BASE_DST))
+        target_path = os.path.join(base_dst, os.path.basename(source_path))
+        if os.path.exists(target_path):
+            self.log(f"任务 CSV 已存在，跳过复制: {target_path}")
+            return target_path
+
+        temp_fd, temp_path = tempfile.mkstemp(
+            dir=base_dst,
+            prefix=f".{os.path.basename(source_path)}.",
+            suffix=".tmp",
+        )
+        os.close(temp_fd)
+        try:
+            shutil.copy2(source_path, temp_path)
+            try:
+                os.link(temp_path, target_path)
+            except FileExistsError:
+                self.log(f"任务 CSV 已存在，跳过复制: {target_path}")
+                return target_path
+            except OSError:
+                target_created = False
+                try:
+                    with open(temp_path, "rb") as source, open(target_path, "xb") as target:
+                        target_created = True
+                        shutil.copyfileobj(source, target)
+                        target.flush()
+                        os.fsync(target.fileno())
+                    shutil.copystat(temp_path, target_path)
+                except FileExistsError:
+                    self.log(f"任务 CSV 已存在，跳过复制: {target_path}")
+                    return target_path
+                except Exception:
+                    if target_created:
+                        try:
+                            os.unlink(target_path)
+                        except FileNotFoundError:
+                            pass
+                    raise
+
+            self.chown_path(target_path)
+            self.normalize_success_output_path(target_path)
+            self.log(f"已复制任务 CSV: {source_path} -> {target_path}")
+            return target_path
+        finally:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
+
+    @staticmethod
+    def _artifact_stems(directory: Path, suffix: str) -> set:
+        """Return artifact filename stems after removing one known suffix."""
+        if not directory.is_dir():
+            return set()
+        return {
+            entry.name[:-len(suffix)]
+            for entry in directory.iterdir()
+            if entry.is_file() and entry.name.endswith(suffix)
+        }
+
+    def verify_task_completeness(self, csv_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Compare the copied task CSV with complete five-artifact result groups."""
+        manifest_path = str(csv_path or self._copied_task_csv_path or "").strip()
+        if not manifest_path:
+            self.log("未配置任务 CSV，跳过任务完整度校验")
+            return None
+        if not os.path.isfile(manifest_path):
+            raise FileNotFoundError(f"copied task CSV does not exist: {manifest_path}")
+
+        _, rows = self._read_csv_records(Path(manifest_path))
+        expected_counts: Counter = Counter()
+        for row in rows:
+            normalized = {
+                str(key).strip().lower(): (value or "").strip()
+                for key, value in row.items()
+                if isinstance(key, str)
+            }
+            task_id = normalized.get("id", "")
+            domain = normalized.get("domain", "")
+            if not task_id or not domain:
+                continue
+            expected_counts[(task_id, domain)] += 1
+
+        base_dst = Path(self.BASE_DST).resolve()
+        actual_counts: Counter = Counter()
+        required_artifacts = {
+            "pcap": ".pcap",
+            "ssl_key": "_ssl_key.log",
+            "content": ".text",
+            "html": ".html",
+            "screenshot": ".png",
+        }
+        artifact_counts = {
+            artifact_name: Counter()
+            for artifact_name in required_artifacts
+        }
+
+        for domain in sorted({domain for _, domain in expected_counts}):
+            domain_root = base_dst / domain
+            stem_sets = {
+                artifact_name: self._artifact_stems(domain_root / artifact_name, suffix)
+                for artifact_name, suffix in required_artifacts.items()
+            }
+            for artifact_name, stems in stem_sets.items():
+                for stem in stems:
+                    task_id, separator, _ = stem.partition("_")
+                    if separator and task_id:
+                        artifact_counts[artifact_name][(task_id, domain)] += 1
+
+            complete_stems = set.intersection(*stem_sets.values()) if stem_sets else set()
+            for stem in complete_stems:
+                task_id, separator, _ = stem.partition("_")
+                if separator and task_id:
+                    actual_counts[(task_id, domain)] += 1
+
+        matched_tasks = sum(
+            min(expected_count, actual_counts.get(key, 0))
+            for key, expected_count in expected_counts.items()
+        )
+        missing_items = []
+        extra_items = []
+        for key in sorted(set(expected_counts) | set(actual_counts)):
+            task_id, domain = key
+            expected_count = expected_counts.get(key, 0)
+            actual_count = actual_counts.get(key, 0)
+            if actual_count < expected_count:
+                missing_items.append(
+                    {
+                        "id": task_id,
+                        "domain": domain,
+                        "expected": expected_count,
+                        "complete": actual_count,
+                        "missing": expected_count - actual_count,
+                        "artifact_counts": {
+                            name: counts.get(key, 0)
+                            for name, counts in artifact_counts.items()
+                        },
+                    }
+                )
+            elif actual_count > expected_count:
+                extra_items.append(
+                    {
+                        "id": task_id,
+                        "domain": domain,
+                        "expected": expected_count,
+                        "complete": actual_count,
+                        "extra": actual_count - expected_count,
+                        "artifact_counts": {
+                            name: counts.get(key, 0)
+                            for name, counts in artifact_counts.items()
+                        },
+                    }
+                )
+
+        expected_tasks = sum(expected_counts.values())
+        complete_groups = sum(actual_counts.values())
+        missing_tasks = max(expected_tasks - matched_tasks, 0)
+        extra_groups = sum(item["extra"] for item in extra_items)
+        completeness_percent = (
+            round(matched_tasks * 100.0 / expected_tasks, 4)
+            if expected_tasks
+            else 100.0
+        )
+        report = {
+            "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "csv_path": str(Path(manifest_path).resolve()),
+            "base_dst": str(base_dst),
+            "required_artifacts": list(required_artifacts),
+            "artifact_file_counts": {
+                name: sum(counts.values())
+                for name, counts in artifact_counts.items()
+            },
+            "expected_tasks": expected_tasks,
+            "complete_artifact_groups": complete_groups,
+            "matched_tasks": matched_tasks,
+            "missing_tasks": missing_tasks,
+            "extra_complete_groups": extra_groups,
+            "completeness_percent": completeness_percent,
+            "missing": missing_items,
+            "extra": extra_items,
+        }
+
+        self._write_execution_task_log("completeness", **report)
+        self.log(
+            "任务完整度校验: "
+            f"expected={expected_tasks}, matched={matched_tasks}, "
+            f"missing={missing_tasks}, extra={extra_groups}, "
+            f"completeness={completeness_percent:.4f}%"
+        )
+        return report
+
     def chown_container_result_paths(self, container: str, paths: List[str]) -> None:
         """Let the host user move files created by root inside the container."""
         targets: List[str] = []
@@ -1281,10 +1621,28 @@ if errors:
         os.makedirs(dst_dir, exist_ok=True)
         self.chown_path(dst_dir)
         self.normalize_success_output_dirs(result_root or dst_dir, dst_dir)
-        new_path = shutil.move(src, dst_dir)
+        target_path = os.path.join(dst_dir, os.path.basename(src))
+        if os.path.exists(target_path):
+            raise FileExistsError(f"result target already exists: {target_path}")
+        new_path = shutil.move(src, target_path)
         self.chown_recursive(new_path)
         self.normalize_success_output_path(new_path)
         return new_path
+
+    @staticmethod
+    def preflight_result_moves(move_plan: List[Tuple[str, str]]) -> None:
+        """Validate all required sources and targets before moving any result."""
+        targets = set()
+        for src_path, dst_dir in move_plan:
+            if not src_path or not os.path.isfile(src_path):
+                raise FileNotFoundError(f"result source missing: {src_path or '<empty>'}")
+
+            target_path = os.path.join(dst_dir, os.path.basename(src_path))
+            if target_path in targets:
+                raise RuntimeError(f"duplicate result target in move plan: {target_path}")
+            targets.add(target_path)
+            if os.path.exists(target_path):
+                raise FileExistsError(f"result target already exists: {target_path}")
 
     # ============== CSV 操作 ==============
     @staticmethod
@@ -1524,6 +1882,23 @@ if errors:
         if wait > 0:
             time.sleep(wait)
 
+    def _wait_before_same_id_exec(self, row_id: str) -> None:
+        """确保同一任务 ID 的相邻 docker exec 启动时间满足最小间隔。"""
+        task_id = str(row_id or "").strip()
+        interval = max(float(self.SAME_ID_EXEC_INTERVAL), 0.0)
+        if not task_id or interval <= 0:
+            return
+
+        with self._same_id_exec_lock:
+            now = time.monotonic()
+            scheduled = max(now, self._same_id_next_ts.get(task_id, now))
+            self._same_id_next_ts[task_id] = scheduled + interval
+
+        wait = scheduled - now
+        if wait > 0:
+            self.log(f"同 ID 任务启动节流: id={task_id}，等待 {wait:.2f} 秒")
+            time.sleep(wait)
+
     # ============== 进度条 ==============
     def _update_progress(self, ok: bool, task_elapsed: float = 0.0) -> None:
         """更新全局进度条"""
@@ -1557,6 +1932,7 @@ if errors:
         """执行单个任务"""
         container = task["container"]
         self._wait_before_first_exec(container)
+        self._wait_before_same_id_exec(task.get("row_id", ""))
         if self._browser_label:
             task["browser_label"] = self._browser_label
         payload = json.dumps(task, ensure_ascii=False)
@@ -1692,6 +2068,14 @@ if errors:
         domain = task.get('domain', 'unknown')
         dst = os.path.join(self.BASE_DST, domain)
 
+        move_plan = [
+            (pcap_path, os.path.join(dst, 'pcap')),
+            (ssl_key_file_path, os.path.join(dst, 'ssl_key')),
+            (content_path, os.path.join(dst, 'content')),
+            (html_path, os.path.join(dst, 'html')),
+            (screenshot_path, os.path.join(dst, 'screenshot')),
+        ]
+        self.preflight_result_moves(move_plan)
         self.prepare_success_output_tree(dst)
 
         # 移动文件
@@ -1762,6 +2146,12 @@ if errors:
         with self._stats_lock:
             stats["fail"] += 1
             stats["errors"].append((task, err))
+        self._write_task_end_log(
+            task,
+            success=False,
+            elapsed=task_elapsed,
+            error=err,
+        )
         self._update_progress(ok=False, task_elapsed=task_elapsed)
 
     def worker_loop(self, container: str, q: "queue.Queue[Dict[str, str]]",
@@ -1785,6 +2175,7 @@ if errors:
 
             if attempt == 0:
                 self.log(f"{container} -> start [{row_id}] {url}")
+                self._write_task_start_log(task)
             else:
                 self.log(f"{container} -> retry {attempt}/{retry} [{row_id}] {url}")
 
@@ -1795,6 +2186,11 @@ if errors:
                     self.log(f"{container} -> done  [{row_id}] {url} ({task_elapsed:.1f}s)")
                     with self._stats_lock:
                         stats["ok"] += 1
+                    self._write_task_end_log(
+                        task,
+                        success=True,
+                        elapsed=task_elapsed,
+                    )
                     self._update_progress(ok=True, task_elapsed=task_elapsed)
                 else:
                     self.log(f"{container} -> fail  [{row_id}] {self.compact_error(err)}")
@@ -1849,6 +2245,8 @@ if errors:
         """执行一批任务"""
         q: "queue.Queue[Dict[str, str]]" = queue.Queue()
         for t in jobs:
+            self._execution_task_sequence += 1
+            t["_task_log_no"] = self._execution_task_sequence
             q.put(t)
 
         stats: Dict[str, Any] = {"ok": 0, "fail": 0, "errors": []}
@@ -1869,6 +2267,8 @@ if errors:
         # 初始化（子类可覆盖 setup 方法）
         self.setup()
         self.ensure_base_dst_writable()
+        self._copied_task_csv_path = self.copy_task_csv_to_base_dst() or ""
+        self.initialize_execution_task_log()
 
         # 准备容器池
         names: List[str] = []
@@ -1880,6 +2280,8 @@ if errors:
         self._global_total_jobs = 0
         self._runtime_prepared = False
         batch_num = 0
+        run_error = ""
+        completeness_report = None
 
         # 创建常驻进度条（total=None 表示未知总数）
         if tqdm is None:
@@ -1938,12 +2340,17 @@ if errors:
                     break
 
         except Exception as e:
+            run_error = repr(e)
             self.log(f"WARN: 执行异常：{e}")
         finally:
             # 关闭进度条
             if self._pbar is not None:
                 self._pbar.close()
                 self._pbar = None
+            try:
+                completeness_report = self.verify_task_completeness()
+            except Exception as e:
+                self.log(f"WARN: 任务完整度校验失败：{e}")
             if self._runtime_prepared or self.should_cleanup_when_idle():
                 self.cleanup()
 
@@ -1958,6 +2365,31 @@ if errors:
         self.log(f"[最终汇总] 批次={batch_num} | 运行时间={elapsed_min:.1f}分钟 | 总数={total_jobs} | "
                  f"完成={total_done} | 剩余={remaining} | "
                  f"成功={self._global_ok} | 失败={self._global_fail} | 每分钟={per_min:.2f} | 平均耗时={avg_time:.1f}秒")
+        run_end_record = {
+            "status": (
+                "failed"
+                if run_error
+                else "completed_with_failures"
+                if self._global_fail
+                else "completed"
+            ),
+            "total": total_jobs,
+            "success": self._global_ok,
+            "failed": self._global_fail,
+            "elapsed_seconds": round(elapsed, 3),
+        }
+        if run_error:
+            run_end_record["error"] = self.compact_error(run_error, limit=1000)
+        if completeness_report is not None:
+            run_end_record.update(
+                {
+                    "expected_tasks": completeness_report["expected_tasks"],
+                    "matched_tasks": completeness_report["matched_tasks"],
+                    "missing_tasks": completeness_report["missing_tasks"],
+                    "completeness_percent": completeness_report["completeness_percent"],
+                }
+            )
+        self._write_execution_task_log("run_end", **run_end_record)
         return batch_num > 0
 
     def setup(self) -> None:
@@ -1980,7 +2412,16 @@ if errors:
     def main(cls) -> bool:
         """入口方法"""
         ingestor = cls()
-        processed_any = ingestor.run()
+        try:
+            ingestor.acquire_runtime_lock()
+        except RuntimeError as e:
+            ingestor.log(f"FATAL: {e}")
+            raise SystemExit(2) from e
+
+        try:
+            processed_any = ingestor.run()
+        finally:
+            ingestor.release_runtime_lock()
         if processed_any:
             time.sleep(300)
         return processed_any
