@@ -125,8 +125,11 @@ def _update_progress(stats: Dict[str, Any]) -> None:
         elapsed_min = elapsed / 60.0 if elapsed > 0 else 0.0
         per_min = (total_done / elapsed_min) if elapsed_min > 0 else 0.0
         avg_time = (elapsed * container_count / total_done) if total_done > 0 else 0.0
+        eta_seconds = BaseTrafficIngestor.estimate_remaining_eta_seconds(remaining, per_min)
+        eta_text = BaseTrafficIngestor.format_eta_hours_minutes(eta_seconds)
         _pbar.set_description(
-            f"任务进度: {total_done}/{total_jobs}个 [剩余: {remaining} | 运行: {elapsed_min:.1f}分钟 | "
+            f"任务进度: {total_done}/{total_jobs}个 [剩余: {remaining} | 预计剩余: {eta_text} | "
+            f"运行: {elapsed_min:.1f}分钟 | "
             f"成功: {stats['ok']} | "
             f"失败: {stats['fail']} | 每分钟: {per_min:.2f} | 平均耗时: {avg_time:.1f}秒]"
         )
@@ -677,7 +680,7 @@ def run_once(names: List[str], jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     with tqdm(
         total=len(jobs),
-        desc=f"任务进度: 0/{len(jobs)}个 [剩余: {len(jobs)} | 初始化中...]",
+        desc=f"任务进度: 0/{len(jobs)}个 [剩余: {len(jobs)} | 预计剩余: 计算中 | 初始化中...]",
         leave=True,
     ) as pbar:
         with _pbar_lock:

@@ -29,9 +29,9 @@ from urllib.parse import urlparse
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SMALL_TOOLS_DIR = SCRIPT_DIR.parent
-DEFAULT_INPUT = SMALL_TOOLS_DIR / "origin" / "urls_tls13_hybrid_top200.txt"
+DEFAULT_INPUT = SMALL_TOOLS_DIR / "origin" / "tumblr_urls_1000.txt"
 DEFAULT_OUTPUT = SMALL_TOOLS_DIR / "result" / f"{DEFAULT_INPUT.stem}.csv"
-DEFAULT_REPEAT_COUNT = 120
+DEFAULT_REPEAT_COUNT = 1
 FIELDNAMES = ["id", "url", "domain"]
 
 

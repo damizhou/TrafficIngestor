@@ -137,6 +137,19 @@ class BaseTrafficIngestor(ABC):
         self._global_total_jobs = 0
         self._global_container_count = 1
 
+    @staticmethod
+    def estimate_remaining_eta_seconds(remaining: int, per_min: float) -> float:
+        """按剩余任务数除以每分钟完成数估算剩余墙钟时间。"""
+        if remaining <= 0 or per_min <= 0:
+            return 0.0
+        return remaining / per_min * 60.0
+
+    @staticmethod
+    def format_eta_hours_minutes(seconds: float) -> str:
+        total_minutes = max(int(round(seconds / 60.0)), 0)
+        hours, minutes = divmod(total_minutes, 60)
+        return f"{hours}小时{minutes}分钟"
+
     # ============== 日志 ==============
     def log(self, *args) -> None:
         """打印带时间戳的日志，适配进度条"""
@@ -1947,10 +1960,13 @@ if errors:
             avg_time = (elapsed * self._global_container_count / total_done) if total_done > 0 else 0
             total_jobs = self._global_total_jobs or total_done
             remaining = max(total_jobs - total_done, 0)
+            eta_seconds = self.estimate_remaining_eta_seconds(remaining, per_min)
+            eta_text = self.format_eta_hours_minutes(eta_seconds)
 
             if self._pbar is not None:
                 self._pbar.set_description(
-                    f"任务进度: {total_done}/{total_jobs}个 [剩余: {remaining} | 运行: {elapsed_min:.1f}分钟 | "
+                    f"任务进度: {total_done}/{total_jobs}个 [剩余: {remaining} | 预计剩余: {eta_text} | "
+                    f"运行: {elapsed_min:.1f}分钟 | "
                     f"成功: {self._global_ok} | 失败: {self._global_fail} | "
                     f"每分钟: {per_min:.2f} | 平均耗时: {avg_time:.1f}秒]"
                 )
@@ -2367,7 +2383,7 @@ if errors:
                     if self._pbar is not None:
                         self._pbar.set_description(
                             f"任务进度: {total_done}/{self._global_total_jobs}个 "
-                            f"[剩余: {remaining} | 初始化中...]"
+                            f"[剩余: {remaining} | 预计剩余: 计算中 | 初始化中...]"
                         )
 
                 if not self._runtime_prepared:
@@ -2423,8 +2439,10 @@ if errors:
         remaining = max(total_jobs - total_done, 0)
         per_min = total_done / elapsed_min if elapsed_min > 0 else 0
         avg_time = (elapsed * self._global_container_count / total_done) if total_done > 0 else 0
+        eta_seconds = self.estimate_remaining_eta_seconds(remaining, per_min)
+        eta_text = self.format_eta_hours_minutes(eta_seconds)
         self.log(f"[最终汇总] 批次={batch_num} | 运行时间={elapsed_min:.1f}分钟 | 总数={total_jobs} | "
-                 f"完成={total_done} | 剩余={remaining} | "
+                 f"完成={total_done} | 剩余={remaining} | 预计剩余={eta_text} | "
                  f"成功={self._global_ok} | 失败={self._global_fail} | 每分钟={per_min:.2f} | 平均耗时={avg_time:.1f}秒")
         run_end_record = {
             "status": (
@@ -2438,6 +2456,7 @@ if errors:
             "success": self._global_ok,
             "failed": self._global_fail,
             "elapsed_seconds": round(elapsed, 3),
+            "remaining_eta_seconds": round(eta_seconds, 3),
         }
         if run_error:
             run_end_record["error"] = self.compact_error(run_error, limit=1000)
