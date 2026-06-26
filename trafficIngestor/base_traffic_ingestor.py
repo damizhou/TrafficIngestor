@@ -120,7 +120,7 @@ class BaseTrafficIngestor(ABC):
         self._first_exec_next_ts = 0.0
         self._first_exec_done_containers = set()
         self._same_id_exec_lock = threading.Lock()
-        self._same_id_next_ts: Dict[str, float] = {}
+        self._same_id_next_ts: Dict[Tuple[str, str], float] = {}
         self._runtime_prepared = False
         self._browser_label = ""
         self._runtime_lock_handle = None
@@ -1010,10 +1010,37 @@ class BaseTrafficIngestor(ABC):
             label=f"{name}/{interface_name}",
         )
 
+    def list_runtime_container_names(self) -> List[str]:
+        """List all Docker containers that belong to the current numeric namespace."""
+        prefix = str(self.CONTAINER_PREFIX or "")
+        if not prefix:
+            return []
+
+        cp = self.run_cmd(["docker", "ps", "-a", "--format", "{{.Names}}"], timeout=60)
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout or "").strip()
+            self.log(f"WARN: 列出现有容器失败，改用当前容器池名称清理: {detail}")
+            return []
+
+        pattern = re.compile(rf"^{re.escape(prefix)}\d+$")
+        names = [
+            line.strip()
+            for line in (cp.stdout or "").splitlines()
+            if pattern.fullmatch(line.strip())
+        ]
+
+        def sort_key(name: str) -> Tuple[int, str]:
+            suffix = name[len(prefix):]
+            return (int(suffix), name) if suffix.isdigit() else (10**12, name)
+
+        return sorted(names, key=sort_key)
+
     def remove_containers(self) -> None:
-        """删除当前容器池的精确容器名，避免误删同前缀的其它任务。"""
+        """删除当前运行命名空间下的数字后缀容器，包含旧动态池残留。"""
         removed = 0
-        for name in self.build_container_names():
+        names = set(self.build_container_names())
+        names.update(self.list_runtime_container_names())
+        for name in sorted(names):
             if self.container_exists(name) is None:
                 continue
             self.remove_container(name)
@@ -1882,21 +1909,23 @@ if errors:
         if wait > 0:
             time.sleep(wait)
 
-    def _wait_before_same_id_exec(self, row_id: str) -> None:
-        """确保同一任务 ID 的相邻 docker exec 启动时间满足最小间隔。"""
-        task_id = str(row_id or "").strip()
+    def _wait_before_same_id_exec(self, task: Dict[str, str]) -> None:
+        """确保同一 ID + domain 的相邻 docker exec 启动时间满足最小间隔。"""
+        task_id = str(task.get("row_id", "") or "").strip()
+        task_domain = str(task.get("domain", "") or "").strip().lower()
+        task_key = (task_id, task_domain)
         interval = max(float(self.SAME_ID_EXEC_INTERVAL), 0.0)
         if not task_id or interval <= 0:
             return
 
         with self._same_id_exec_lock:
             now = time.monotonic()
-            scheduled = max(now, self._same_id_next_ts.get(task_id, now))
-            self._same_id_next_ts[task_id] = scheduled + interval
+            scheduled = max(now, self._same_id_next_ts.get(task_key, now))
+            self._same_id_next_ts[task_key] = scheduled + interval
 
         wait = scheduled - now
         if wait > 0:
-            self.log(f"同 ID 任务启动节流: id={task_id}，等待 {wait:.2f} 秒")
+            self.log(f"同 ID/domain 任务启动节流: id={task_id}, domain={task_domain or '<empty>'}，等待 {wait:.2f} 秒")
             time.sleep(wait)
 
     # ============== 进度条 ==============
@@ -1932,7 +1961,7 @@ if errors:
         """执行单个任务"""
         container = task["container"]
         self._wait_before_first_exec(container)
-        self._wait_before_same_id_exec(task.get("row_id", ""))
+        self._wait_before_same_id_exec(task)
         if self._browser_label:
             task["browser_label"] = self._browser_label
         payload = json.dumps(task, ensure_ascii=False)

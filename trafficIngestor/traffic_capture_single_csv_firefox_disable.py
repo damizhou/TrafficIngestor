@@ -22,16 +22,16 @@ from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
 class TrafficIngestor(BaseTrafficIngestor):
     """Firefox 流量采集器"""
 
-    HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_firefox')
+    HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_firefox_disable')
     CONTAINER_COUNT = 15 * 20
-    BASE_DST = '/netdisk/mlj/20260626/temp'
-    # BASE_DST = '/netdisk/mlj/20260626/temp_disableML-KEM'
+    # BASE_DST = '/netdisk/mlj/20260625/temp'
+    BASE_DST = '/netdisk/mlj/20260626/temp_disableML-KEM'
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"
     BROWSER_NAME = "firefox"
     BROWSER_VERSION_COMMANDS = (("firefox", "--version"),)
     RETRY = 5
 
-    CSV_PATH = os.path.join(_project_root, 'small_tools', "result", 'urls_tls13_hybrid_top200.csv')
+    CSV_PATH = os.path.join(_project_root, 'small_tools', "result", 'urls_tls13_hybrid_top200_disable.csv')
 
     def __init__(self):
         super().__init__()
