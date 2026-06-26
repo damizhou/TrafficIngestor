@@ -2163,24 +2163,46 @@ if errors:
             except queue.Empty:
                 return
 
-            row_id = task.get("row_id", "")
-            url = task.get("url", "")
-            task["container"] = container
-
-            # 记录重试次数和首次开始时间
-            attempt = task.get("_retry_count", 0)
-            if "_start_time" not in task:
-                task["_start_time"] = time.time()
-            task_start_time = task["_start_time"]
-
-            if attempt == 0:
-                self.log(f"{container} -> start [{row_id}] {url}")
-                self._write_task_start_log(task)
-            else:
-                self.log(f"{container} -> retry {attempt}/{retry} [{row_id}] {url}")
-
             try:
-                ok, err = self.exec_once(task)
+                row_id = task.get("row_id", "")
+                url = task.get("url", "")
+                task["container"] = container
+
+                # 记录重试次数和首次开始时间
+                attempt = task.get("_retry_count", 0)
+                if "_start_time" not in task:
+                    task["_start_time"] = time.time()
+                task_start_time = task["_start_time"]
+
+                if attempt == 0:
+                    self.log(f"{container} -> start [{row_id}] {url}")
+                    self._write_task_start_log(task)
+                else:
+                    self.log(f"{container} -> retry {attempt}/{retry} [{row_id}] {url}")
+
+                try:
+                    ok, err = self.exec_once(task)
+                except subprocess.TimeoutExpired:
+                    err = f"timeout>{self.DOCKER_EXEC_TIMEOUT}s"
+                    self.log(f"{container} -> timeout [{row_id}] {url}")
+                    if attempt < retry:
+                        task["_retry_count"] = attempt + 1
+                        time.sleep(2)
+                        q.put(task)
+                    else:
+                        self._handle_final_failure(task, err, stats, task_start_time)
+                    continue
+                except Exception as e:
+                    err = repr(e)
+                    self.log(f"{container} -> error [{row_id}] {err}")
+                    if attempt < retry:
+                        task["_retry_count"] = attempt + 1
+                        time.sleep(2)
+                        q.put(task)
+                    else:
+                        self._handle_final_failure(task, err, stats, task_start_time)
+                    continue
+
                 if ok:
                     task_elapsed = time.time() - task_start_time
                     self.log(f"{container} -> done  [{row_id}] {url} ({task_elapsed:.1f}s)")
@@ -2202,27 +2224,14 @@ if errors:
                     else:
                         self._handle_final_failure(task, err, stats, task_start_time)
 
-            except subprocess.TimeoutExpired:
-                err = f"timeout>{self.DOCKER_EXEC_TIMEOUT}s"
-                self.log(f"{container} -> timeout [{row_id}] {url}")
-                if attempt < retry:
-                    task["_retry_count"] = attempt + 1
-                    time.sleep(2)
-                    q.put(task)
-                else:
-                    self._handle_final_failure(task, err, stats, task_start_time)
+            finally:
+                q.task_done()
 
-            except Exception as e:
-                err = repr(e)
-                self.log(f"{container} -> error [{row_id}] {err}")
-                if attempt < retry:
-                    task["_retry_count"] = attempt + 1
-                    time.sleep(2)
-                    q.put(task)
-                else:
-                    self._handle_final_failure(task, err, stats, task_start_time)
-
-            q.task_done()
+    @staticmethod
+    def get_unfinished_task_count(q: "queue.Queue[Dict[str, str]]") -> int:
+        """Return Queue unfinished task count without blocking indefinitely."""
+        with q.all_tasks_done:
+            return int(q.unfinished_tasks)
 
     # ============== 信号处理 ==============
     def _signal_handler(self, signum, _frame) -> None:
@@ -2253,9 +2262,32 @@ if errors:
         self.log(f"开始执行：jobs={len(jobs)}，并发容器={len(names)}，镜像={self.DOCKER_IMAGE}")
 
         with ThreadPoolExecutor(max_workers=len(names)) as pool:
-            for n in names:
+            futures = [
                 pool.submit(self.worker_loop, n, q, stats, self.RETRY)
-            q.join()
+                for n in names
+            ]
+            while True:
+                unfinished = self.get_unfinished_task_count(q)
+                for name, future in zip(names, futures):
+                    if future.done():
+                        exc = future.exception()
+                        if exc is not None:
+                            raise RuntimeError(
+                                f"worker {name} 异常退出，队列未完成任务数={unfinished}: {exc!r}"
+                            ) from exc
+
+                if unfinished == 0:
+                    break
+
+                if all(future.done() for future in futures):
+                    raise RuntimeError(
+                        f"所有 worker 已退出，但队列仍有 {unfinished} 个未完成任务"
+                    )
+
+                time.sleep(1.0)
+
+            for future in futures:
+                future.result()
 
         return stats
 
