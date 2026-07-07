@@ -3,12 +3,14 @@
 """
 x_traffic.py
 
-从 CSV 读取 URL，使用 Firefox 浏览器在容器池中并发采集流量数据。
+从 CSV 读取 X(Twitter) 用户 URL，使用容器池并发采集流量数据。
 """
 
 import os
 import sys
+from datetime import datetime
 from typing import List, Dict
+import time
 
 # 添加项目根目录到路径
 _current_dir: str = os.path.dirname(os.path.abspath(__file__))
@@ -18,20 +20,25 @@ if _project_root not in sys.path:
 
 from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
 
-
+BASE_DST_DATE = datetime.now().strftime("%y%m%d")
 class TrafficIngestor(BaseTrafficIngestor):
-    """Firefox 流量采集器"""
+    """流量采集器"""
 
-    HOST_CODE_PATH = os.path.join(_project_root, 'traffic_capture_single_csv_firefox')
-    CONTAINER_COUNT = 15 * 20
-    BASE_DST = '/netdisk/mlj/20260626/temp'
-    # BASE_DST = '/netdisk/mlj/20260626/temp_disableML-KEM'
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider_firefox:251104"
-    BROWSER_NAME = "firefox"
-    BROWSER_VERSION_COMMANDS = (("firefox", "--version"),)
+    # ============== 配置 ==============
+    BROWSER_NAME = "chrome_ech"
+    HOST_CODE_PATH = os.path.join(_project_root, "traffic_capture_single_csv_ech")
+    RESULT_DOMAIN_ROOT_DIR = "sites"
+    # BASE_DST = f"/netdisk2/ww/wiki/260702/chrome/us/"
+    BASE_DST = f'/netdisk/mlj/20260707/ech'
     RETRY = 5
-
-    CSV_PATH = os.path.join(_project_root, 'small_tools', "result", 'urls_tls13_hybrid_top200.csv')
+    # CSV 必须包含表头，字段名（大小写不敏感）：
+    # - id: 唯一标识，用于任务完成/失败后从 CSV 删除对应行
+    # - url: 访问地址（建议完整 URL，包含 http:// 或 https://）
+    # - domain: 域名（用于日志与流量采集标识）
+    # 示例：
+    # id,url,domain
+    # 1,https://vox-cdn.com,vox-cdn.com
+    CSV_PATH = os.path.join(_project_root, "small_tools", "result", "ech_top10.csv")
 
     def __init__(self):
         super().__init__()
@@ -49,8 +56,8 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     def on_task_success(self, task: Dict[str, str], paths: Dict[str, str]) -> None:
         """任务成功后从 CSV 删除记录"""
-        row_id = task.get("row_id", "")
-        if row_id:
+        match_url = task.get("url", "")
+        if match_url:
             try:
                 self.remove_first_matching_row_from_csv(
                     self.CSV_PATH,
@@ -62,6 +69,8 @@ class TrafficIngestor(BaseTrafficIngestor):
                 )
             except Exception as e:
                 self.log(f"ERROR: 删除 CSV 记录失败: {e}")
+        # pass
+
 
     def should_continue(self) -> bool:
         """只运行一次"""
@@ -69,12 +78,15 @@ class TrafficIngestor(BaseTrafficIngestor):
 
     def cleanup(self) -> None:
         """清理容器"""
-        import time
         time.sleep(60)
         self.remove_containers()
 
 
 if __name__ == "__main__":
-    for _ in range(5):
+    for i in range(5):
         if not TrafficIngestor.main():
+            break
+        if i < 4 and TrafficIngestor.has_pending_jobs():
+            time.sleep(1200)
+        else:
             break

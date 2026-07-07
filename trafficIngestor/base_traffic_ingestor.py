@@ -108,6 +108,7 @@ class BaseTrafficIngestor(ABC):
     NORMALIZE_SUCCESS_OUTPUT_MODES: bool = True
     SUCCESS_OUTPUT_DIR_MODE: int = 0o775
     SUCCESS_OUTPUT_FILE_MODE: int = 0o664
+    RESULT_DOMAIN_ROOT_DIR: str = ""
 
     def __init__(self):
         self._runtime_entry_script = self.get_entry_script_path()
@@ -1520,7 +1521,7 @@ if errors:
                 continue
             expected_counts[(task_id, domain)] += 1
 
-        base_dst = Path(self.BASE_DST).resolve()
+        base_dst = Path(self.get_result_domain_base_dir()).resolve()
         actual_counts: Counter = Counter()
         required_artifacts = {
             "pcap": ".pcap",
@@ -1907,6 +1908,13 @@ if errors:
         pcap_path = str(self.get_current_success_paths().get("pcap", "")).strip()
         return f"，pcap保存到{pcap_path}" if pcap_path else ""
 
+    def get_result_domain_base_dir(self) -> str:
+        """Return the directory that contains per-domain result folders."""
+        subdir = str(self.RESULT_DOMAIN_ROOT_DIR or "").strip().strip("/\\")
+        if not subdir:
+            return self.BASE_DST
+        return os.path.join(self.BASE_DST, subdir)
+
     def _wait_before_first_exec(self, container: str) -> None:
         """仅在每个容器第一次执行 docker exec 前做全局节流。"""
         interval = max(float(self.FIRST_EXEC_INTERVAL), 0.0)
@@ -2111,7 +2119,7 @@ if errors:
 
         # 构建目标目录
         domain = task.get('domain', 'unknown')
-        dst = os.path.join(self.BASE_DST, domain)
+        dst = os.path.join(self.get_result_domain_base_dir(), domain)
 
         move_plan = [
             (pcap_path, os.path.join(dst, 'pcap')),
