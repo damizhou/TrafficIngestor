@@ -72,12 +72,6 @@ class TrafficIngestor(BaseTrafficIngestor):
         """只运行一次"""
         return False
 
-    def cleanup(self) -> None:
-        """清理容器"""
-        time.sleep(60)
-        self.remove_containers()
-
-
 if __name__ == "__main__":
     for i in range(5):
         if not TrafficIngestor.main():

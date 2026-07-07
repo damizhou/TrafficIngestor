@@ -61,11 +61,6 @@ class TrafficIngestor(BaseClashTrafficIngestor):
     def should_continue(self) -> bool:
         return False
 
-    def cleanup(self) -> None:
-        time.sleep(60)
-        self.remove_containers()
-
-
 if __name__ == "__main__":
     for i in range(5):
         TrafficIngestor.main()

@@ -14,6 +14,7 @@ from tools.chrome_ech import (
     create_chrome_driver,
     kill_chrome_processes,
     open_url_and_save_content,
+    save_chrome_ech_evidence,
     validate_chrome_ech_result,
 )
 
@@ -28,6 +29,7 @@ class EchCaptureAction(BaseAction):
     def __init__(self):
         super().__init__()
         self._last_ech_validation_error = ""
+        self._ech_extra_result_paths = {}
 
     def kill_browser_processes(self):
         kill_chrome_processes()
@@ -56,11 +58,18 @@ class EchCaptureAction(BaseAction):
 
     def validate_files(self, pcap_path, ssl_key_file_path, content_path, html_path):
         self._last_ech_validation_error = ""
+        self._ech_extra_result_paths = {}
         if not super().validate_files(pcap_path, ssl_key_file_path, content_path, html_path):
             return False
 
         ok, detail = validate_chrome_ech_result(self.allowed_domain, pcap_path=pcap_path)
         if ok:
+            evidence_dir = os.path.join(_app_root, "ech_evidence")
+            self._ech_extra_result_paths = save_chrome_ech_evidence(
+                self.allowed_domain,
+                pcap_path,
+                evidence_dir,
+            )
             self.logger.info(f"ECH校验通过: {detail}")
             return True
 
@@ -73,6 +82,11 @@ class EchCaptureAction(BaseAction):
         if self._last_ech_validation_error:
             details.append(f"ech_invalid={self._last_ech_validation_error[:300]}")
         return details
+
+    def write_result(self, meta_path, result):
+        if result.get("success") and self._ech_extra_result_paths:
+            result.update(self._ech_extra_result_paths)
+        super().write_result(meta_path, result)
 
 
 if __name__ == "__main__":

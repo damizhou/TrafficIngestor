@@ -109,6 +109,7 @@ class BaseTrafficIngestor(ABC):
     SUCCESS_OUTPUT_DIR_MODE: int = 0o775
     SUCCESS_OUTPUT_FILE_MODE: int = 0o664
     RESULT_DOMAIN_ROOT_DIR: str = ""
+    CLEANUP_WAIT_SECONDS_ON_INCOMPLETE: float = 60.0
 
     def __init__(self):
         self._runtime_entry_script = self.get_entry_script_path()
@@ -2108,6 +2109,13 @@ if errors:
             html_path,
             screenshot_path,
         ]
+        extra_move_items = []
+        for key, (src_path, dst_subdir) in self.build_additional_result_moves(task, result, "").items():
+            if not src_path:
+                continue
+            extra_move_items.append((key, src_path, dst_subdir))
+            if str(src_path).startswith("/app"):
+                container_result_paths.append(src_path)
         self.chown_container_result_paths(container, container_result_paths)
 
         # 转换容器路径为宿主机路径
@@ -2120,6 +2128,10 @@ if errors:
         # 构建目标目录
         domain = task.get('domain', 'unknown')
         dst = os.path.join(self.get_result_domain_base_dir(), domain)
+        extra_move_items = [
+            (key, self.container_path_to_host_path(src_path), dst_subdir)
+            for key, src_path, dst_subdir in extra_move_items
+        ]
 
         move_plan = [
             (pcap_path, os.path.join(dst, 'pcap')),
@@ -2128,6 +2140,10 @@ if errors:
             (html_path, os.path.join(dst, 'html')),
             (screenshot_path, os.path.join(dst, 'screenshot')),
         ]
+        move_plan.extend(
+            (src_path, os.path.join(dst, dst_subdir))
+            for _, src_path, dst_subdir in extra_move_items
+        )
         self.preflight_result_moves(move_plan)
         self.prepare_success_output_tree(dst)
 
@@ -2139,9 +2155,7 @@ if errors:
         new_screenshot = self.move_and_chown(screenshot_path, os.path.join(dst, 'screenshot'), result_root=dst)
 
         extra_saved_paths: Dict[str, str] = {}
-        for key, (src_path, dst_subdir) in self.build_additional_result_moves(task, result, dst).items():
-            if not src_path:
-                continue
+        for key, src_path, dst_subdir in extra_move_items:
             if not os.path.exists(src_path):
                 self.log(f"WARNING: extra result file missing: {key} -> {src_path}")
                 continue
@@ -2485,8 +2499,21 @@ if errors:
         pass
 
     def cleanup(self) -> None:
-        """清理工作，子类可覆盖"""
-        pass
+        """清理容器；成功完成全部任务时不额外等待。"""
+        wait_seconds = self.get_cleanup_wait_seconds()
+        if wait_seconds > 0:
+            self.log(f"等待任务现场稳定 {wait_seconds:g} 秒后清理容器")
+            time.sleep(wait_seconds)
+        self.remove_containers()
+
+    def get_cleanup_wait_seconds(self) -> float:
+        """Return cleanup delay; skip the old fixed wait when all tasks finished."""
+        total_done = self._global_ok + self._global_fail
+        total_jobs = self._global_total_jobs or total_done
+        remaining = max(total_jobs - total_done, 0)
+        if total_done > 0 and remaining == 0 and self._global_fail == 0:
+            return 0.0
+        return max(float(self.CLEANUP_WAIT_SECONDS_ON_INCOMPLETE), 0.0)
 
     def should_continue(self) -> bool:
         """是否继续下一批次，子类可覆盖"""

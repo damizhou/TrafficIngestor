@@ -71,16 +71,19 @@ class TrafficIngestor(BaseTrafficIngestor):
                 self.log(f"ERROR: 删除 CSV 记录失败: {e}")
         # pass
 
+    def build_additional_result_moves(self, task: Dict[str, str], result: Dict[str, str], dst: str):
+        moves = {}
+        for key in ("ech_evidence_manifest", "ech_netlog"):
+            container_path = str(result.get(key, "") or "").strip()
+            if not container_path:
+                continue
+            moves[key] = (container_path, "ech_evidence")
+        return moves
+
 
     def should_continue(self) -> bool:
         """只运行一次"""
         return False
-
-    def cleanup(self) -> None:
-        """清理容器"""
-        time.sleep(60)
-        self.remove_containers()
-
 
 if __name__ == "__main__":
     for i in range(5):

@@ -309,6 +309,100 @@ def _list_tls_sni_from_pcap(pcap_path):
     return names, ""
 
 
+def _query_https_records(hostname):
+    dig = shutil.which("dig")
+    if not dig:
+        return {"status": "dig_unavailable", "records": []}
+
+    records = []
+    errors = []
+    for server in ("1.1.1.1", "8.8.8.8"):
+        cmd = [dig, "+time=5", "+tries=1", "+short", "HTTPS", hostname, f"@{server}"]
+        try:
+            cp = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=10,
+            )
+        except Exception as e:
+            errors.append(f"{server}: {type(e).__name__}: {e}")
+            continue
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout or "").strip()
+            errors.append(f"{server}: rc={cp.returncode} {detail[:200]}")
+            continue
+        for line in cp.stdout.splitlines():
+            record = line.strip()
+            if record and record not in records:
+                records.append(record)
+
+    status = "ok" if records else "empty"
+    if errors:
+        status = f"{status}_with_errors"
+    return {"status": status, "records": records, "errors": errors}
+
+
+def save_chrome_ech_evidence(domain_or_url, pcap_path, evidence_dir, netlog_path=ECH_NETLOG_PATH):
+    """Persist ECH-related verification evidence for one successful capture."""
+    hostname = _extract_hostname(domain_or_url)
+    if not hostname:
+        raise ValueError(f"invalid ECH target: {domain_or_url!r}")
+
+    evidence_root = Path(evidence_dir)
+    evidence_root.mkdir(parents=True, exist_ok=True)
+    stem = Path(pcap_path).stem if pcap_path else f"{datetime.now().strftime('%Y%m%d_%H_%M_%S')}_{hostname}"
+
+    saved_netlog_path = ""
+    netlog_summary = {
+        "path": netlog_path,
+        "exists": bool(netlog_path and os.path.exists(netlog_path)),
+        "has_ech_marker": False,
+    }
+    if netlog_summary["exists"]:
+        saved_netlog = evidence_root / f"{stem}_netlog.json"
+        shutil.copy2(netlog_path, saved_netlog)
+        saved_netlog_path = str(saved_netlog)
+        try:
+            netlog_text = _read_text_file(netlog_path)
+            netlog_summary["has_ech_marker"] = _has_ech_netlog_marker(netlog_text)
+            netlog_summary["size"] = os.path.getsize(netlog_path)
+        except Exception as e:
+            netlog_summary["read_error"] = f"{type(e).__name__}: {e}"
+
+    sni_names, sni_error = _list_tls_sni_from_pcap(pcap_path) if pcap_path else (None, "pcap_missing")
+    manifest = {
+        "target": hostname,
+        "captured_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "doh_template": ECH_DOH_TEMPLATE,
+        "netlog": netlog_summary,
+        "saved_netlog_path": saved_netlog_path,
+        "pcap_path": pcap_path or "",
+        "https_records": _query_https_records(hostname),
+        "tls_clienthello_sni": {
+            "status": "ok" if sni_names is not None else sni_error,
+            "names": sni_names or [],
+            "target_name_visible": hostname in (sni_names or []),
+        },
+        "note": (
+            "SSL keylog can help decrypt TLS application data when supported by the "
+            "protocol/tooling, but it does not reveal ECH ClientHelloInner or the "
+            "ECH private configuration key."
+        ),
+    }
+
+    manifest_path = evidence_root / f"{stem}_ech_evidence.json"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "ech_evidence_manifest": str(manifest_path),
+        "ech_netlog": saved_netlog_path,
+    }
+
+
 def validate_chrome_ech_result(domain_or_url, pcap_path=None, netlog_path=ECH_NETLOG_PATH):
     """
     Validate that Chrome left observable ECH evidence and did not expose target SNI.
