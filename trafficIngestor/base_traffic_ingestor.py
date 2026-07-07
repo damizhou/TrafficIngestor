@@ -2537,7 +2537,7 @@ if errors:
             processed_any = ingestor.run()
         finally:
             ingestor.release_runtime_lock()
-        if processed_any:
+        if processed_any and cls.has_pending_jobs():
             time.sleep(300)
         return processed_any
 
