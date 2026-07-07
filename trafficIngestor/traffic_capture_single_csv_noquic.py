@@ -25,11 +25,11 @@ class TrafficIngestor(BaseTrafficIngestor):
     """流量采集器"""
 
     # ============== 配置 ==============
-    BROWSER_NAME = "chrome_ech"
-    HOST_CODE_PATH = os.path.join(_project_root, "traffic_capture_single_csv_ech")
+    BROWSER_NAME = "chrome_noquic"
+    HOST_CODE_PATH = os.path.join(_project_root, "traffic_capture_single_csv_noquic")
     RESULT_DOMAIN_ROOT_DIR = "sites"
     # BASE_DST = f"/netdisk2/ww/wiki/260702/chrome/us/"
-    BASE_DST = f'/netdisk/mlj/20260707/ech_noquic'
+    BASE_DST = f'/netdisk/mlj/20260707/noech_noquic'
     RETRY = 5
     # CSV 必须包含表头，字段名（大小写不敏感）：
     # - id: 唯一标识，用于任务完成/失败后从 CSV 删除对应行
@@ -70,16 +70,6 @@ class TrafficIngestor(BaseTrafficIngestor):
             except Exception as e:
                 self.log(f"ERROR: 删除 CSV 记录失败: {e}")
         # pass
-
-    def build_additional_result_moves(self, task: Dict[str, str], result: Dict[str, str], dst: str):
-        moves = {}
-        for key in ("ech_evidence_manifest", "ech_netlog"):
-            container_path = str(result.get(key, "") or "").strip()
-            if not container_path:
-                continue
-            moves[key] = (container_path, "ech_evidence")
-        return moves
-
 
     def should_continue(self) -> bool:
         """只运行一次"""

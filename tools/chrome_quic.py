@@ -19,7 +19,6 @@ import time
 import math
 import queue
 import threading
-from urllib.parse import urlparse
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -78,19 +77,6 @@ MAX_SCREENSHOT_DEVICE_DIMENSION = 16384
 MAX_SCREENSHOT_DEVICE_PIXELS = 60_000_000
 FULL_PAGE_SCREENSHOT_TIMEOUT_SECS = 300
 VIEWPORT_SCREENSHOT_TIMEOUT_SECS = 120
-ECH_DOH_TEMPLATE = os.environ.get(
-    "CHROME_ECH_DOH_TEMPLATE",
-    "https://cloudflare-dns.com/dns-query",
-)
-ECH_NETLOG_PATH = os.environ.get("CHROME_ECH_NETLOG_PATH", "/tmp/netlog.json")
-ECH_ENABLE_FEATURES = "EncryptedClientHello"
-ECH_NETLOG_MARKERS = (
-    "encrypted_client_hello",
-    "encryptedclienthello",
-    "ech_config",
-    "echconfig",
-    '"ech"',
-)
 
 
 def _host_matches_domain(host, domain):
@@ -171,8 +157,7 @@ def _install_chrome_managed_policy(logger=None):
         "BrowserSignin": 0,
         "ComponentUpdatesEnabled": False,
         "DefaultNotificationsSetting": 2,
-        "DnsOverHttpsMode": "secure",
-        "DnsOverHttpsTemplates": ECH_DOH_TEMPLATE,
+        "DnsOverHttpsMode": "off",
         "MetricsReportingEnabled": False,
         "NetworkPredictionOptions": 2,
         "PasswordManagerEnabled": False,
@@ -200,10 +185,7 @@ def _create_chrome_profile_dir(logger=None):
     local_state = {
         "background_mode": {"enabled": False},
         "browser": {"enabled_labs_experiments": []},
-        "dns_over_https": {
-            "mode": "secure",
-            "templates": ECH_DOH_TEMPLATE,
-        },
+        "dns_over_https": {"mode": "off"},
         "signin": {"allowed": False},
     }
     try:
@@ -234,219 +216,6 @@ def _attach_profile_cleanup(browser, profile_dir):
     return browser
 
 
-def _extract_hostname(value):
-    candidate = (value or "").strip()
-    if not candidate:
-        return ""
-    if "://" not in candidate:
-        candidate = f"https://{candidate}"
-    parsed = urlparse(candidate)
-    return (parsed.hostname or "").strip(".").lower()
-
-
-def _has_ech_netlog_marker(netlog_text):
-    lowered = netlog_text.lower()
-    return any(marker in lowered for marker in ECH_NETLOG_MARKERS)
-
-
-def _read_text_file(path, max_bytes=80_000_000):
-    with open(path, "rb") as f:
-        data = f.read(max_bytes + 1)
-    if len(data) > max_bytes:
-        raise RuntimeError(f"netlog too large for ECH validation: {path} > {max_bytes} bytes")
-    return data.decode("utf-8", errors="ignore")
-
-
-def _find_tshark():
-    explicit = os.environ.get("TSHARK_PATH", "").strip()
-    candidates = [explicit] if explicit else []
-    candidates.append("tshark")
-    for candidate in candidates:
-        if not candidate:
-            continue
-        resolved = shutil.which(candidate) if candidate == "tshark" else candidate
-        if resolved and os.path.exists(resolved):
-            return resolved
-    return ""
-
-
-def _list_tls_sni_from_pcap(pcap_path):
-    tshark = _find_tshark()
-    if not tshark:
-        return None, "tshark_unavailable"
-
-    cmd = [
-        tshark,
-        "-r",
-        pcap_path,
-        "-Y",
-        "tls.handshake.type==1 && tls.handshake.extensions_server_name",
-        "-T",
-        "fields",
-        "-e",
-        "tls.handshake.extensions_server_name",
-    ]
-    cp = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=30,
-    )
-    if cp.returncode != 0:
-        detail = (cp.stderr or cp.stdout or "").strip().splitlines()
-        message = detail[0] if detail else f"rc={cp.returncode}"
-        return None, f"tshark_failed={message}"
-
-    names = []
-    seen = set()
-    for line in cp.stdout.splitlines():
-        for raw_name in line.split(","):
-            name = raw_name.strip().strip(".").lower()
-            if name and name not in seen:
-                seen.add(name)
-                names.append(name)
-    return names, ""
-
-
-def _query_https_records(hostname):
-    dig = shutil.which("dig")
-    if not dig:
-        return {"status": "dig_unavailable", "records": []}
-
-    records = []
-    errors = []
-    for server in ("1.1.1.1", "8.8.8.8"):
-        cmd = [dig, "+time=5", "+tries=1", "+short", "HTTPS", hostname, f"@{server}"]
-        try:
-            cp = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=10,
-            )
-        except Exception as e:
-            errors.append(f"{server}: {type(e).__name__}: {e}")
-            continue
-        if cp.returncode != 0:
-            detail = (cp.stderr or cp.stdout or "").strip()
-            errors.append(f"{server}: rc={cp.returncode} {detail[:200]}")
-            continue
-        for line in cp.stdout.splitlines():
-            record = line.strip()
-            if record and record not in records:
-                records.append(record)
-
-    status = "ok" if records else "empty"
-    if errors:
-        status = f"{status}_with_errors"
-    return {"status": status, "records": records, "errors": errors}
-
-
-def save_chrome_ech_evidence(domain_or_url, pcap_path, evidence_dir, netlog_path=ECH_NETLOG_PATH):
-    """Persist ECH-related verification evidence for one successful capture."""
-    hostname = _extract_hostname(domain_or_url)
-    if not hostname:
-        raise ValueError(f"invalid ECH target: {domain_or_url!r}")
-
-    evidence_root = Path(evidence_dir)
-    evidence_root.mkdir(parents=True, exist_ok=True)
-    stem = Path(pcap_path).stem if pcap_path else f"{datetime.now().strftime('%Y%m%d_%H_%M_%S')}_{hostname}"
-
-    saved_netlog_path = ""
-    netlog_summary = {
-        "path": netlog_path,
-        "exists": bool(netlog_path and os.path.exists(netlog_path)),
-        "has_ech_marker": False,
-    }
-    if netlog_summary["exists"]:
-        saved_netlog = evidence_root / f"{stem}_netlog.json"
-        shutil.copy2(netlog_path, saved_netlog)
-        saved_netlog_path = str(saved_netlog)
-        try:
-            netlog_text = _read_text_file(netlog_path)
-            netlog_summary["has_ech_marker"] = _has_ech_netlog_marker(netlog_text)
-            netlog_summary["size"] = os.path.getsize(netlog_path)
-        except Exception as e:
-            netlog_summary["read_error"] = f"{type(e).__name__}: {e}"
-
-    sni_names, sni_error = _list_tls_sni_from_pcap(pcap_path) if pcap_path else (None, "pcap_missing")
-    manifest = {
-        "target": hostname,
-        "captured_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "doh_template": ECH_DOH_TEMPLATE,
-        "netlog": netlog_summary,
-        "saved_netlog_path": saved_netlog_path,
-        "pcap_path": pcap_path or "",
-        "https_records": _query_https_records(hostname),
-        "tls_clienthello_sni": {
-            "status": "ok" if sni_names is not None else sni_error,
-            "names": sni_names or [],
-            "target_name_visible": hostname in (sni_names or []),
-        },
-        "note": (
-            "SSL keylog can help decrypt TLS application data when supported by the "
-            "protocol/tooling, but it does not reveal ECH ClientHelloInner or the "
-            "ECH private configuration key."
-        ),
-    }
-
-    manifest_path = evidence_root / f"{stem}_ech_evidence.json"
-    manifest_path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    return {
-        "ech_evidence_manifest": str(manifest_path),
-        "ech_netlog": saved_netlog_path,
-    }
-
-
-def validate_chrome_ech_result(domain_or_url, pcap_path=None, netlog_path=ECH_NETLOG_PATH):
-    """
-    Validate that Chrome left observable ECH evidence and did not expose target SNI.
-
-    This is intentionally strict: if Chrome falls back to normal TLS or the target
-    domain has no usable ECHConfig, the capture should fail instead of being mixed
-    into the ECH dataset.
-    """
-    hostname = _extract_hostname(domain_or_url)
-    if not hostname:
-        return False, f"invalid_ech_target={domain_or_url!r}"
-
-    if not netlog_path or not os.path.exists(netlog_path):
-        return False, f"ech_netlog_missing={netlog_path}"
-
-    try:
-        netlog_text = _read_text_file(netlog_path)
-    except Exception as e:
-        return False, f"ech_netlog_read_failed={type(e).__name__}: {e}"
-
-    lowered_netlog = netlog_text.lower()
-    if hostname not in lowered_netlog:
-        return False, f"ech_netlog_target_missing={hostname}"
-    if ECH_DOH_TEMPLATE.lower() not in lowered_netlog:
-        return False, f"ech_doh_template_missing={ECH_DOH_TEMPLATE}"
-    if not _has_ech_netlog_marker(netlog_text):
-        return False, "ech_marker_missing_in_netlog"
-
-    sni_detail = "sni_check=not_run"
-    if pcap_path:
-        if not os.path.exists(pcap_path):
-            return False, f"ech_pcap_missing={pcap_path}"
-
-        sni_names, sni_error = _list_tls_sni_from_pcap(pcap_path)
-        if sni_names is None:
-            sni_detail = sni_error
-        else:
-            sni_detail = f"sni_count={len(sni_names)}"
-            if hostname in sni_names:
-                return False, f"target_sni_plaintext_in_pcap={hostname}"
-
-    return True, f"ech_validated target={hostname} netlog={netlog_path} {sni_detail}"
-
-
 def is_docker():
     """检测是否在Docker环境中运行"""
     # 检查cgroup文件
@@ -469,8 +238,7 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
                           enable_ssl_key_log=True, data_base_dir=None,
                           proxy_server=None, proxy_bypass_list=None, logger=None,
                           blocked_hosts=None, chrome_binary_path=None,
-                          chromedriver_path=None, artifact_label=None,
-                          force_ech=True):
+                          chromedriver_path=None, artifact_label=None):
     """
     创建Chrome浏览器驱动
 
@@ -529,7 +297,8 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
 
     _ACCEPT_LANGUAGE = "zh-CN,zh;q=0.9"
     _LANG_PRIMARY = "zh-CN"
-    disabled_chrome_features = (
+    _DISABLED_CHROME_FEATURES = ",".join((
+        "AsyncDns",
         "AutofillServerCommunication",
         "CertificateTransparencyComponentUpdater",
         "DialMediaRouteProvider",
@@ -539,8 +308,7 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
         "OptimizationHints",
         "PrintCompositorService",
         "Translate",
-    )
-    _DISABLED_CHROME_FEATURES = ",".join(disabled_chrome_features)
+    ))
 
     # 创建 ChromeOptions 实例
     chrome_options = Options()
@@ -556,6 +324,7 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
     chrome_options.add_argument(f"--user-data-dir={chrome_profile_dir}")
     chrome_options.add_argument("--disable-gpu")  # 禁用 GPU 加速
     chrome_options.add_argument(f"--disable-features={_DISABLED_CHROME_FEATURES}")  # 降低后台服务联网
+    chrome_options.add_argument("--disable-async-dns")  # 备用参数
     chrome_options.add_argument("--disable-background-mode")
     chrome_options.add_argument("--no-sandbox")  # 禁用沙盒
     chrome_options.add_argument("--disable-dev-shm-usage")  # 限制使用/dev/shm
@@ -584,12 +353,8 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
     chrome_options.add_argument("--no-default-browser-check")
     chrome_options.add_argument("--no-pings")
     chrome_options.add_argument("--homepage=about:blank")
-    chrome_options.add_argument(f"--log-net-log={ECH_NETLOG_PATH}")
+    chrome_options.add_argument("--log-net-log=/tmp/netlog.json")
     chrome_options.add_argument("--net-log-capture-mode=Everything")
-    if force_ech:
-        chrome_options.add_argument(f"--enable-features={ECH_ENABLE_FEATURES}")
-        chrome_options.add_argument("--dns-over-https-mode=secure")
-        chrome_options.add_argument(f"--dns-over-https-templates={ECH_DOH_TEMPLATE}")
     if proxy_server:
         chrome_options.add_argument(f"--proxy-server={proxy_server}")
     if proxy_bypass_list:
@@ -643,9 +408,6 @@ def create_chrome_driver(task_name=None, formatted_time=None, parsers=None,
         _remove_chrome_profile_dir(chrome_profile_dir)
         raise
     _attach_profile_cleanup(browser, chrome_profile_dir)
-    browser._traffic_ingestor_force_ech = bool(force_ech)
-    browser._traffic_ingestor_ech_target = task_name or ""
-    browser._traffic_ingestor_netlog_path = ECH_NETLOG_PATH
     browser.execute_cdp_cmd('Network.enable', {})
     if normalized_blocked_hosts:
         try:
