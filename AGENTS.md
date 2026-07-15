@@ -1,21 +1,20 @@
 # 仓库指南
 
-最后更新：2026-07-10 16:29:04
+最后更新：2026-07-15 10:16:10
 
 ## 项目概览
 本仓库用于批量采集网页访问流量与页面内容，核心流程是由宿主机脚本调度 Docker 容器，在容器内驱动 Chrome、Edge、Firefox 或 Scrapy 执行任务，并输出 `pcap`、TLS 密钥日志、HTML、截图等结果。新增功能或修复问题时，优先判断改动属于“宿主机调度层”、“容器内执行层”还是“URL 收集层”，避免修改范围扩散。
 
 ## 项目结构与模块组织
-`trafficIngestor/` 保存通用宿主机侧调度脚本，`trafficIngestor_ech/` 保存 ECH 宿主机侧调度脚本，两者负责管理 Docker 容器池、分发任务、汇总抓包结果。`tools/` 是公共工具层，包含浏览器驱动、`tcpdump` 抓包、日志、`BaseAction` 与 `BaseTrafficIngestor` 等复用逻辑。`traffic_capture_single_csv_firefox/`、`traffic_capture_single_csv_edge/`、`traffic_capture_single_csv/` 等目录是容器内运行目录，通常以 `action.py` 作为入口。`url_list_collector/` 是 Scrapy 子项目，用于采集候选 URL。输入 CSV 和临时辅助文件主要放在 `small_tools/`。
+`trafficIngestor/` 保存宿主机侧调度脚本，负责管理 Docker 容器池、分发任务、汇总抓包结果。`tools/` 是公共工具层，包含浏览器驱动、`tcpdump` 抓包、日志、`BaseAction` 与 `BaseTrafficIngestor` 等复用逻辑。`traffic_capture_single_csv_firefox/`、`traffic_capture_single_csv_edge/`、`traffic_capture_single_csv/` 等目录是容器内运行目录，通常以 `action.py` 作为入口。`url_list_collector/` 是 Scrapy 子项目，用于采集候选 URL。输入 CSV 和临时辅助文件主要放在 `small_tools/`。
 
 ## 构建、测试与开发命令
 优先先做语法校验，再跑最小范围验证：
 
 ```powershell
 python -m py_compile tools\base_action.py tools\firefox.py traffic_capture_single_csv_firefox\action.py
-python -m py_compile tools\base_chrome.py tools\chrome_ech.py traffic_capture_single_csv_ech\action.py trafficIngestor_ech\traffic_capture_single_csv_ech.py
+python -m py_compile tools\chrome.py traffic_capture_single_csv\action.py trafficIngestor\traffic_capture_single_csv_base.py
 python trafficIngestor\traffic_capture_single_csv_firefox.py
-python trafficIngestor_ech\traffic_capture_single_csv_ech.py
 python trafficIngestor\get_url_list.py
 ```
 
