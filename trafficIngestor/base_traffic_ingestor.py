@@ -36,10 +36,10 @@ except ModuleNotFoundError:
     tqdm = None
 
 # 添加项目根目录到路径
-_current_dir: str = os.path.dirname(os.path.abspath(__file__))
-_project_root: str = os.path.dirname(_current_dir)
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
+CURRENT_DIR: str = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT: str = os.path.dirname(CURRENT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 
 def get_real_username() -> str:
@@ -69,6 +69,9 @@ class BaseTrafficIngestor(ABC):
     3. 可选：覆盖 process_result() 方法自定义结果处理
     4. 可选：覆盖 on_task_success() / on_task_failed() 方法
     """
+
+    CURRENT_DIR: str = CURRENT_DIR
+    PROJECT_ROOT: str = PROJECT_ROOT
 
     # ============== 子类必须设置的配置 ==============
     BASE_NAME: str = ""
@@ -109,7 +112,9 @@ class BaseTrafficIngestor(ABC):
     SUCCESS_OUTPUT_DIR_MODE: int = 0o775
     SUCCESS_OUTPUT_FILE_MODE: int = 0o664
     RESULT_DOMAIN_ROOT_DIR: str = ""
+    TASK_CSV_DATA_ROOT_LAYOUT: bool = False
     CLEANUP_WAIT_SECONDS_ON_INCOMPLETE: float = 60.0
+    WORKER_QUEUE_WAIT_TIMEOUT: float = 0.0
 
     def __init__(self):
         self._runtime_entry_script = self.get_entry_script_path()
@@ -353,7 +358,7 @@ class BaseTrafficIngestor(ABC):
         self.BASE_NAME = runtime_name
         self.CONTAINER_PREFIX = f"{get_real_username()}_{runtime_name}"
         if not self.HOST_CODE_PATH:
-            self.HOST_CODE_PATH = os.path.join(_project_root, runtime_name)
+            self.HOST_CODE_PATH = os.path.join(self.PROJECT_ROOT, runtime_name)
 
     def acquire_runtime_lock(self) -> None:
         """Reject a second collector process using the same runtime namespace."""
@@ -856,7 +861,7 @@ class BaseTrafficIngestor(ABC):
     ) -> None:
         """创建容器，同时挂载代码目录和 tools 目录"""
         uid, gid = str(os.getuid()), str(os.getgid())
-        tools_path = os.path.join(_project_root, 'tools')
+        tools_path = os.path.join(self.PROJECT_ROOT, 'tools')
         self.log(f"creating container: {name}")
         cmd = [
             "docker", "run",
@@ -1108,7 +1113,7 @@ class BaseTrafficIngestor(ABC):
 
     def get_default_action_source(self) -> Path:
         """Return the fallback action.py path."""
-        return Path(_project_root) / "traffic_capture_single_csv" / "action.py"
+        return Path(self.PROJECT_ROOT) / "traffic_capture_single_csv" / "action.py"
 
     def ensure_host_code_path_ready(self, ensure_action: bool = True) -> Path:
         """Ensure HOST_CODE_PATH exists and optionally backfill action.py."""
@@ -1429,8 +1434,20 @@ if errors:
         except OSError as e:
             self.log(f"WARN: cannot chmod BASE_DST to {oct(self.SUCCESS_OUTPUT_DIR_MODE)}: {base_dst} -> {e}")
 
+    def build_task_csv_copy_target(
+        self,
+        source_path: str,
+    ) -> str:
+        """Resolve the task CSV destination while keeping legacy layout by default."""
+        filename = os.path.basename(source_path)
+        if not self.TASK_CSV_DATA_ROOT_LAYOUT:
+            return os.path.join(os.path.abspath(str(self.BASE_DST)), filename)
+
+        data_root = os.path.abspath(self.get_result_domain_base_dir())
+        return os.path.join(data_root, filename)
+
     def copy_task_csv_to_base_dst(self) -> Optional[str]:
-        """Copy CSV_PATH to the BASE_DST root once without overwriting it."""
+        """Copy CSV_PATH to its configured result location without overwriting it."""
         csv_path = str(getattr(self, "CSV_PATH", "") or "").strip()
         if not csv_path:
             return None
@@ -1440,13 +1457,16 @@ if errors:
             raise FileNotFoundError(f"task CSV does not exist: {source_path}")
 
         base_dst = os.path.abspath(str(self.BASE_DST))
-        target_path = os.path.join(base_dst, os.path.basename(source_path))
+        target_path = self.build_task_csv_copy_target(source_path)
+        target_dir = os.path.dirname(target_path)
+        os.makedirs(target_dir, exist_ok=True)
+        self.normalize_success_output_dirs(base_dst, target_dir)
         if os.path.exists(target_path):
             self.log(f"任务 CSV 已存在，跳过复制: {target_path}")
             return target_path
 
         temp_fd, temp_path = tempfile.mkstemp(
-            dir=base_dst,
+            dir=target_dir,
             prefix=f".{os.path.basename(source_path)}.",
             suffix=".tmp",
         )
@@ -1982,6 +2002,10 @@ if errors:
                 self._pbar.update(1)
 
     # ============== 任务执行 ==============
+    def get_docker_exec_env(self, task: Dict[str, str]) -> Dict[str, str]:
+        """Return environment variables passed to docker exec for one task."""
+        return {}
+
     def exec_once(self, task: Dict[str, str]) -> Tuple[bool, str]:
         """执行单个任务"""
         container = task["container"]
@@ -1990,8 +2014,12 @@ if errors:
         if self._browser_label:
             task["browser_label"] = self._browser_label
         payload = json.dumps(task, ensure_ascii=False)
+        exec_env_args = []
+        for key, value in self.get_docker_exec_env(task).items():
+            if key and value is not None:
+                exec_env_args.extend(["-e", f"{key}={value}"])
         cmd = [
-            "docker", "exec", container,
+            "docker", "exec", *exec_env_args, container,
             "python", "-u", f"{self.CONTAINER_CODE_PATH}/action.py",
             payload
         ]
@@ -2200,6 +2228,10 @@ if errors:
         """任务失败回调，子类可覆盖（如标记数据库）"""
         pass
 
+    def is_non_retryable_error(self, error: str) -> bool:
+        """Return True when retrying the same task cannot change the result."""
+        return False
+
     def _handle_final_failure(self, task: Dict[str, str], err: str,
                                stats: Dict[str, Any], task_start_time: float) -> None:
         """处理最终失败的任务"""
@@ -2207,8 +2239,9 @@ if errors:
         url = task.get("url", "")
         container = task.get("container", "unknown")
         task_elapsed = time.time() - task_start_time
+        attempts = int(task.get("_retry_count", 0)) + 1
 
-        self.log(f"{container} -> give up [{row_id}] {url} after {self.RETRY + 1} attempts")
+        self.log(f"{container} -> give up [{row_id}] {url} after {attempts} attempts")
         self.on_task_failed(task, err)
         with self._stats_lock:
             stats["fail"] += 1
@@ -2226,8 +2259,14 @@ if errors:
         """Worker 循环，失败任务放回队列由其他容器重试"""
         while True:
             try:
-                task = q.get_nowait()
+                wait_timeout = max(float(self.WORKER_QUEUE_WAIT_TIMEOUT), 0.0)
+                if wait_timeout > 0:
+                    task = q.get(timeout=wait_timeout)
+                else:
+                    task = q.get_nowait()
             except queue.Empty:
+                if self.should_wait_for_more_tasks():
+                    continue
                 return
 
             try:
@@ -2283,8 +2322,12 @@ if errors:
                     self._update_progress(ok=True, task_elapsed=task_elapsed)
                 else:
                     self.log(f"{container} -> fail  [{row_id}] {self.compact_error(err)}")
+                    non_retryable = self.is_non_retryable_error(err)
+                    if non_retryable:
+                        self.log(f"{container} -> no retry [{row_id}] {self.compact_error(err)}")
+                        self._handle_final_failure(task, err, stats, task_start_time)
                     # 失败后放回队列，让其他容器重试
-                    if attempt < retry:
+                    elif attempt < retry:
                         task["_retry_count"] = attempt + 1
                         time.sleep(2)
                         q.put(task)
@@ -2293,6 +2336,10 @@ if errors:
 
             finally:
                 q.task_done()
+
+    def should_wait_for_more_tasks(self) -> bool:
+        """动态生产任务的子类可覆盖；默认队列为空时立即退出。"""
+        return False
 
     @staticmethod
     def get_unfinished_task_count(q: "queue.Queue[Dict[str, str]]") -> int:

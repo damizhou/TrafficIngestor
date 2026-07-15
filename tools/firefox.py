@@ -215,7 +215,8 @@ def _normalize_no_proxy_list(proxy_bypass_list):
 
 
 def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None,
-                          proxy_server=None, proxy_bypass_list=None, artifact_label=None):
+                          proxy_server=None, proxy_bypass_list=None, artifact_label=None,
+                          preference_overrides=None):
     """
     创建Firefox浏览器驱动
 
@@ -226,6 +227,7 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
         data_base_dir: 数据基础目录
         proxy_server: 可选的浏览器代理地址，如 http://127.0.0.1:7890
         proxy_bypass_list: 可选的代理绕过列表，如 127.0.0.1;localhost
+        preference_overrides: 可选的 Firefox preference 覆盖项，用于网络采集变体
 
     Returns:
         browser: WebDriver实例
@@ -368,6 +370,10 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
     opts.set_preference("browser.helperApps.neverAsk.saveToDisk",
                         "application/octet-stream,application/pdf,text/plain,text/html,application/json")
     opts.set_preference("pdfjs.disabled", True)
+
+    if preference_overrides:
+        for name, value in preference_overrides.items():
+            opts.set_preference(name, value)
 
     manual_proxy = _parse_manual_proxy(proxy_server)
     if manual_proxy:

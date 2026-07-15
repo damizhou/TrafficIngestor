@@ -19,12 +19,25 @@ from tools.chrome_ech import (
 )
 
 
+def _env_flag(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_value(name):
+    return os.environ.get(name, "").strip() or None
+
+
 class EchCaptureAction(BaseAction):
     """Chrome capture action that rejects non-ECH visits."""
 
     browser_name = "Chrome ECH"
     pcap_lowest_size = 100000
     ssl_key_lowest_size = 128
+    require_wireshark_decryptable = _env_flag("CHROME_ECH_REQUIRE_DECRYPTABLE", True)
+    delete_invalid_files_on_fail = _env_flag("CHROME_ECH_DELETE_INVALID_FILES", False)
 
     def __init__(self):
         super().__init__()
@@ -44,6 +57,8 @@ class EchCaptureAction(BaseAction):
             proxy_bypass_list=self.get_browser_proxy_bypass_list(),
             logger=self.logger,
             artifact_label=artifact_label,
+            chrome_binary_path=_env_value("CHROME_ECH_BINARY_PATH"),
+            chromedriver_path=_env_value("CHROME_ECH_CHROMEDRIVER_PATH"),
             force_ech=True,
         )
 
@@ -62,13 +77,19 @@ class EchCaptureAction(BaseAction):
         if not super().validate_files(pcap_path, ssl_key_file_path, content_path, html_path):
             return False
 
-        ok, detail = validate_chrome_ech_result(self.allowed_domain, pcap_path=pcap_path)
+        ok, detail = validate_chrome_ech_result(
+            self.allowed_domain,
+            pcap_path=pcap_path,
+            ssl_key_path=ssl_key_file_path,
+            require_wireshark_decryptable=self.require_wireshark_decryptable,
+        )
         if ok:
             evidence_dir = os.path.join(_app_root, "ech_evidence")
             self._ech_extra_result_paths = save_chrome_ech_evidence(
                 self.allowed_domain,
                 pcap_path,
                 evidence_dir,
+                ssl_key_path=ssl_key_file_path,
             )
             self.logger.info(f"ECH校验通过: {detail}")
             return True

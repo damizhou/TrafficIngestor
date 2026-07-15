@@ -14,7 +14,16 @@ _project_root = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from tools.base_chrome import BaseChromeDriverFactory
+from tools.base_chrome import (
+    CHROME_BACKGROUND_BLOCKED_HOSTS,
+    BaseChromeDriverFactory,
+    add_cookies,
+    build_browser_error_diagnostics,
+    get_chrome_background_blocked_hosts,
+    kill_chrome_processes,
+    open_url_and_save_content,
+    screenshot_full_page,
+)
 
 
 ECH_DOH_TEMPLATE = os.environ.get(
@@ -30,6 +39,17 @@ ECH_NETLOG_MARKERS = (
     "echconfig",
     '"ech"',
 )
+ECH_KEYLOG_LABELS = (
+    "ECH_SECRET",
+    "ECH_CONFIG",
+)
+TLS13_KEYLOG_LABELS_FOR_HTTP = (
+    "CLIENT_HANDSHAKE_TRAFFIC_SECRET",
+    "SERVER_HANDSHAKE_TRAFFIC_SECRET",
+    "CLIENT_TRAFFIC_SECRET_0",
+    "SERVER_TRAFFIC_SECRET_0",
+)
+WIRESHARK_ECH_KEYLOG_LABELS = ECH_KEYLOG_LABELS + TLS13_KEYLOG_LABELS_FOR_HTTP
 
 
 class EchChromeDriverFactory(BaseChromeDriverFactory):
@@ -131,6 +151,65 @@ def _read_text_file(path, max_bytes=80_000_000):
     return data.decode("utf-8", errors="ignore")
 
 
+def summarize_ssl_key_log(ssl_key_path, max_bytes=20_000_000):
+    """Return label-level diagnostics without copying secret values."""
+    summary = {
+        "path": ssl_key_path or "",
+        "exists": bool(ssl_key_path and os.path.exists(ssl_key_path)),
+        "labels": {},
+        "line_count": 0,
+        "missing_wireshark_ech_labels": list(WIRESHARK_ECH_KEYLOG_LABELS),
+        "has_ech_decryption_secrets": False,
+        "has_tls13_http_secrets": False,
+        "wireshark_can_decrypt_true_sni_and_http": False,
+    }
+    if not summary["exists"]:
+        return summary
+
+    try:
+        summary["size"] = os.path.getsize(ssl_key_path)
+        text = _read_text_file(ssl_key_path, max_bytes=max_bytes)
+    except Exception as e:
+        summary["read_error"] = f"{type(e).__name__}: {e}"
+        return summary
+
+    labels = {}
+    line_count = 0
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        line_count += 1
+        label = line.split(None, 1)[0]
+        labels[label] = labels.get(label, 0) + 1
+
+    missing = [
+        label for label in WIRESHARK_ECH_KEYLOG_LABELS
+        if labels.get(label, 0) <= 0
+    ]
+    summary.update({
+        "labels": labels,
+        "line_count": line_count,
+        "missing_wireshark_ech_labels": missing,
+        "has_ech_decryption_secrets": all(labels.get(label, 0) > 0 for label in ECH_KEYLOG_LABELS),
+        "has_tls13_http_secrets": all(labels.get(label, 0) > 0 for label in TLS13_KEYLOG_LABELS_FOR_HTTP),
+        "wireshark_can_decrypt_true_sni_and_http": not missing,
+    })
+    return summary
+
+
+def _validate_ssl_key_log_for_wireshark_ech(ssl_key_path):
+    summary = summarize_ssl_key_log(ssl_key_path)
+    if not summary["exists"]:
+        return False, f"ech_keylog_missing={ssl_key_path or ''}", summary
+    if summary.get("read_error"):
+        return False, f"ech_keylog_read_failed={summary['read_error']}", summary
+    missing = summary.get("missing_wireshark_ech_labels") or []
+    if missing:
+        return False, f"ech_keylog_missing_labels={','.join(missing)}", summary
+    return True, "ech_keylog_wireshark_decryptable=true", summary
+
+
 def _find_tshark():
     explicit = os.environ.get("TSHARK_PATH", "").strip()
     candidates = [explicit] if explicit else []
@@ -218,7 +297,8 @@ def _query_https_records(hostname):
     return {"status": status, "records": records, "errors": errors}
 
 
-def save_chrome_ech_evidence(domain_or_url, pcap_path, evidence_dir, netlog_path=ECH_NETLOG_PATH):
+def save_chrome_ech_evidence(domain_or_url, pcap_path, evidence_dir,
+                             netlog_path=ECH_NETLOG_PATH, ssl_key_path=None):
     """Persist ECH-related verification evidence for one successful capture."""
     hostname = _extract_hostname(domain_or_url)
     if not hostname:
@@ -259,10 +339,10 @@ def save_chrome_ech_evidence(domain_or_url, pcap_path, evidence_dir, netlog_path
             "names": sni_names or [],
             "target_name_visible": hostname in (sni_names or []),
         },
+        "ssl_key_log": summarize_ssl_key_log(ssl_key_path),
         "note": (
-            "SSL keylog can help decrypt TLS application data when supported by the "
-            "protocol/tooling, but it does not reveal ECH ClientHelloInner or the "
-            "ECH private configuration key."
+            "Wireshark needs ECH_SECRET and ECH_CONFIG to decrypt ClientHelloInner "
+            "and TLS 1.3 traffic secrets to decrypt HTTP over TLS."
         ),
     }
 
@@ -277,7 +357,8 @@ def save_chrome_ech_evidence(domain_or_url, pcap_path, evidence_dir, netlog_path
     }
 
 
-def validate_chrome_ech_result(domain_or_url, pcap_path=None, netlog_path=ECH_NETLOG_PATH):
+def validate_chrome_ech_result(domain_or_url, pcap_path=None, netlog_path=ECH_NETLOG_PATH,
+                               ssl_key_path=None, require_wireshark_decryptable=False):
     """
     Validate that Chrome left observable ECH evidence and did not expose target SNI.
 
@@ -305,6 +386,12 @@ def validate_chrome_ech_result(domain_or_url, pcap_path=None, netlog_path=ECH_NE
     if not _has_ech_netlog_marker(netlog_text):
         return False, "ech_marker_missing_in_netlog"
 
+    keylog_detail = "keylog_decryptability=not_required"
+    if require_wireshark_decryptable:
+        keylog_ok, keylog_detail, _ = _validate_ssl_key_log_for_wireshark_ech(ssl_key_path)
+        if not keylog_ok:
+            return False, keylog_detail
+
     sni_detail = "sni_check=not_run"
     if pcap_path:
         if not os.path.exists(pcap_path):
@@ -318,4 +405,4 @@ def validate_chrome_ech_result(domain_or_url, pcap_path=None, netlog_path=ECH_NE
             if hostname in sni_names:
                 return False, f"target_sni_plaintext_in_pcap={hostname}"
 
-    return True, f"ech_validated target={hostname} netlog={netlog_path} {sni_detail}"
+    return True, f"ech_validated target={hostname} netlog={netlog_path} {sni_detail} {keylog_detail}"

@@ -27,6 +27,8 @@ class TrafficIngestor(BaseTrafficIngestor):
     # ============== 配置 ==============
     # BASE_DST = f"/netdisk2/ww/wiki/260702/chrome/us/"
     BASE_DST = f'/netdisk/mlj/20260707/noech'
+    RESULT_DOMAIN_ROOT_DIR = "data"
+    TASK_CSV_DATA_ROOT_LAYOUT = True
     RETRY = 5
     # CSV 必须包含表头，字段名（大小写不敏感）：
     # - id: 唯一标识，用于任务完成/失败后从 CSV 删除对应行

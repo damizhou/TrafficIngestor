@@ -29,7 +29,7 @@ class TrafficIngestor(BaseTrafficIngestor):
     HOST_CODE_PATH = os.path.join(_project_root, "traffic_capture_single_csv_ech")
     RESULT_DOMAIN_ROOT_DIR = "sites"
     # BASE_DST = f"/netdisk2/ww/wiki/260702/chrome/us/"
-    BASE_DST = f'/netdisk/mlj/20260707/ech_noquic'
+    BASE_DST = f'/netdisk/mlj/20260710/test'
     RETRY = 5
     # CSV 必须包含表头，字段名（大小写不敏感）：
     # - id: 唯一标识，用于任务完成/失败后从 CSV 删除对应行
@@ -55,21 +55,21 @@ class TrafficIngestor(BaseTrafficIngestor):
         return jobs
 
     def on_task_success(self, task: Dict[str, str], paths: Dict[str, str]) -> None:
-        """任务成功后从 CSV 删除记录"""
-        match_url = task.get("url", "")
-        if match_url:
-            try:
-                self.remove_first_matching_row_from_csv(
-                    self.CSV_PATH,
-                    {
-                        "id": task.get("row_id", ""),
-                        "url": task.get("url", ""),
-                        "domain": task.get("domain", ""),
-                    },
-                )
-            except Exception as e:
-                self.log(f"ERROR: 删除 CSV 记录失败: {e}")
-        # pass
+        # """任务成功后从 CSV 删除记录"""
+        # match_url = task.get("url", "")
+        # if match_url:
+        #     try:
+        #         self.remove_first_matching_row_from_csv(
+        #             self.CSV_PATH,
+        #             {
+        #                 "id": task.get("row_id", ""),
+        #                 "url": task.get("url", ""),
+        #                 "domain": task.get("domain", ""),
+        #             },
+        #         )
+        #     except Exception as e:
+        #         self.log(f"ERROR: 删除 CSV 记录失败: {e}")
+        pass
 
     def build_additional_result_moves(self, task: Dict[str, str], result: Dict[str, str], dst: str):
         moves = {}
@@ -79,6 +79,29 @@ class TrafficIngestor(BaseTrafficIngestor):
                 continue
             moves[key] = (container_path, "ech_evidence")
         return moves
+
+    def is_non_retryable_error(self, error: str) -> bool:
+        """ECH keylog label absence is a browser capability issue, not a retryable visit failure."""
+        text = error or ""
+        return (
+            "ech_keylog_missing_labels=" in text
+            and ("ECH_SECRET" in text or "ECH_CONFIG" in text)
+        )
+
+    def get_docker_exec_env(self, task: Dict[str, str]) -> Dict[str, str]:
+        env = {}
+        for key in (
+            "CHROME_ECH_BINARY_PATH",
+            "CHROME_ECH_CHROMEDRIVER_PATH",
+            "CHROME_ECH_REQUIRE_DECRYPTABLE",
+            "CHROME_ECH_DELETE_INVALID_FILES",
+            "CHROME_ECH_DOH_TEMPLATE",
+            "CHROME_ECH_NETLOG_PATH",
+        ):
+            value = os.environ.get(key, "").strip()
+            if value:
+                env[key] = value
+        return env
 
 
     def should_continue(self) -> bool:

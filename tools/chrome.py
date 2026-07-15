@@ -8,7 +8,16 @@ _project_root = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from tools.base_chrome import BaseChromeDriverFactory
+from tools.base_chrome import (
+    CHROME_BACKGROUND_BLOCKED_HOSTS,
+    BaseChromeDriverFactory,
+    add_cookies,
+    build_browser_error_diagnostics,
+    get_chrome_background_blocked_hosts,
+    kill_chrome_processes,
+    open_url_and_save_content,
+    screenshot_full_page,
+)
 
 
 class ChromeDriverFactory(BaseChromeDriverFactory):
