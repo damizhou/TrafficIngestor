@@ -6,9 +6,10 @@ from single_csv._common import PROJECT_ROOT
 
 
 CONFIG = {
+    "DELETE_CSV_RECORD_ON_SUCCESS": True,
     "CONTAINER_COUNT": 15 * 20,
     "BASE_DST": "/netdisk/mlj/20260626/temp_disableML-KEM",
-    "DOCKER_IMAGE": "chuanzhoupan/trace_spider_firefox:251104",
+    "DOCKER_IMAGE": "chuanzhoupan/trace_spider_firefox:152.0.6",
     "BROWSER_NAME": "firefox",
     "BROWSER_VERSION_COMMANDS": (("firefox", "--version"),),
     "CSV_PATH": os.path.join(

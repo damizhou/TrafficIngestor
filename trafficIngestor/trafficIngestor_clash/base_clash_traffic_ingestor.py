@@ -26,7 +26,7 @@ for import_root in (_project_root, _source_root):
     if import_root not in sys.path:
         sys.path.insert(0, import_root)
 
-from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor, get_real_username
+from host_scheduler.base_traffic_ingestor import BaseTrafficIngestor, get_real_username
 
 
 class BaseClashTrafficIngestor(BaseTrafficIngestor):

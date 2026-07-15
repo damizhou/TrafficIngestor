@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""加载指定的非 Clash 单 CSV 配置文件并运行采集任务。"""
+"""加载指定的非 Clash 单 CSV 配置文件并运行采集任务。
+
+使用方法：
+    python trafficIngestor/host_scheduler/single_csv_profiles.py <配置文件路径>
+
+示例：
+    python trafficIngestor/host_scheduler/single_csv_profiles.py trafficIngestor/single_csv/base.py
+
+配置文件必须定义 CONFIG、RUNTIME_NAME 和 ACTION_PROFILE。
+"""
 
 from __future__ import annotations
 
@@ -18,8 +27,8 @@ for _import_root in (_project_root, _source_root):
     if _import_root not in sys.path:
         sys.path.insert(0, _import_root)
 
-from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
-from trafficIngestor.csv_ingestor_common import (
+from host_scheduler.base_traffic_ingestor import BaseTrafficIngestor
+from host_scheduler.csv_ingestor_common import (
     CsvIngestorProfile,
     RunPolicy,
     build_profile_ingestor,
@@ -93,6 +102,11 @@ def load_profile_definition(config_path: str | Path) -> ProfileDefinition:
     config = _required_module_value(module, "CONFIG", source_path)
     if not isinstance(config, Mapping):
         raise TypeError(f"配置文件 {source_path} 的 CONFIG 必须是映射类型")
+    delete_csv_record = config.get("DELETE_CSV_RECORD_ON_SUCCESS", True)
+    if not isinstance(delete_csv_record, bool):
+        raise TypeError(
+            f"配置文件 {source_path} 的 DELETE_CSV_RECORD_ON_SUCCESS 必须是布尔值"
+        )
 
     runtime_name = _required_module_value(module, "RUNTIME_NAME", source_path)
     if not isinstance(runtime_name, str) or not runtime_name.strip():

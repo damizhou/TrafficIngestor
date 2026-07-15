@@ -14,8 +14,8 @@ _project_root = str(Path(__file__).resolve().parent.parent)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
-from trafficIngestor.csv_ingestor_common import (
+from host_scheduler.base_traffic_ingestor import BaseTrafficIngestor
+from host_scheduler.csv_ingestor_common import (
     CsvIngestorProfile,
     RunPolicy,
     build_profile_ingestor,
@@ -92,7 +92,7 @@ PROFILES = {
     "firefox": CsvIngestorProfile(
         {
             "BASE_DST": "/netdisk2/ww/trojan/wiki/260413/firefox",
-            "DOCKER_IMAGE": "chuanzhoupan/trace_spider_firefox:251104",
+            "DOCKER_IMAGE": "chuanzhoupan/trace_spider_firefox:152.0.6",
             "BROWSER_NAME": "firefox",
             "BROWSER_VERSION_COMMANDS": (("firefox", "--version"),),
             "CSV_PATH": os.path.join(

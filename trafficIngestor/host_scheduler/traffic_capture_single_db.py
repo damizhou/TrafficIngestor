@@ -22,7 +22,7 @@ _project_root: str = os.path.dirname(_source_root)
 if _source_root not in sys.path:
     sys.path.insert(0, _source_root)
 
-from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
+from host_scheduler.base_traffic_ingestor import BaseTrafficIngestor
 
 
 class _DailyErrorLogWriter:

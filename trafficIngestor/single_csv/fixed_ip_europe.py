@@ -6,6 +6,7 @@ from single_csv._common import PROJECT_ROOT
 
 
 CONFIG = {
+    "DELETE_CSV_RECORD_ON_SUCCESS": True,
     "SHARED_FIXED_IP_NETWORK": "traffic_ingestor_fixed_ip_europe_net",
     "CONTAINER_COUNT": 2 * 40,
     "BASE_DST": "/netdisk2/pcz/TrafficSimulation/260528/fra",

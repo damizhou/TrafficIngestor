@@ -119,6 +119,7 @@ class BaseTrafficIngestor(ABC):
     RESULT_DOMAIN_ROOT_DIR: str = "data"
     TASK_CSV_DATA_ROOT_LAYOUT: bool = True
     SUCCESS_DELETE_GUARD_FIELD: str = "url"
+    DELETE_CSV_RECORD_ON_SUCCESS: bool = True
     CLEANUP_WAIT_SECONDS_ON_INCOMPLETE: float = 60.0
     WORKER_QUEUE_WAIT_TIMEOUT: float = 0.0
 

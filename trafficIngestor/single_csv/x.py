@@ -7,6 +7,7 @@ from single_csv._common import PROJECT_ROOT
 
 
 CONFIG = {
+    "DELETE_CSV_RECORD_ON_SUCCESS": True,
     "BASE_DST": (
         "/netdisk/x_with_ssl_key/"
         f"collection_without_login_{datetime.now().strftime('%y%m%d')}"

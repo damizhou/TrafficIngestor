@@ -6,6 +6,7 @@ from single_csv._common import PROJECT_ROOT
 
 
 CONFIG = {
+    "DELETE_CSV_RECORD_ON_SUCCESS": True,
     "BASE_DST": "/netdisk2/ww/wiki/0325/edge",
     "DOCKER_IMAGE": "chuanzhoupan/trace_spider_edge:260309",
     "BROWSER_NAME": "edge",

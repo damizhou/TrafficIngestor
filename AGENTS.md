@@ -1,21 +1,21 @@
 # 仓库指南
 
-最后更新：2026-07-15 17:43:20
+最后更新：2026-07-15 18:54:18
 
 ## 项目概览
 本仓库用于批量采集网页访问流量与页面内容，核心流程是由宿主机脚本调度 Docker 容器，在容器内驱动 Chrome、Edge、Firefox 或 Scrapy 执行任务，并输出 `pcap`、TLS 密钥日志、HTML、截图等结果。新增功能或修复问题时，优先判断改动属于“宿主机调度层”、“容器内执行层”还是“URL 收集层”，避免修改范围扩散。
 
 ## 项目结构与模块组织
-`trafficIngestor/` 是源码根目录：`trafficIngestor/trafficIngestor/` 和 `trafficIngestor/trafficIngestor_clash/` 保存宿主机调度脚本，`trafficIngestor/traffic_capture_single_csv/` 与 `trafficIngestor/traffic_capture_single_db/` 保存容器执行入口，`trafficIngestor/tools/browsers/` 保存浏览器实现，`trafficIngestor/tools/` 其余文件保存抓包、日志和 Action 公共模块，`trafficIngestor/url_list_collector/` 保存 Scrapy URL 收集项目。非 Clash 单 CSV 配置位于 `trafficIngestor/single_csv/`，通过 `python trafficIngestor/trafficIngestor/single_csv_profiles.py <配置文件路径>` 加载；Clash 模板和节点配置位于 `configs/clash/`。输入 CSV 和数据维护脚本集中在 `scripts/`，运行工作区统一写入 `runtime/`。
+`trafficIngestor/` 是源码根目录：`trafficIngestor/host_scheduler/` 和 `trafficIngestor/trafficIngestor_clash/` 保存宿主机调度脚本，`trafficIngestor/traffic_capture_single_csv/` 与 `trafficIngestor/traffic_capture_single_db/` 保存容器执行入口，`trafficIngestor/tools/browsers/` 保存浏览器实现，`trafficIngestor/tools/` 其余文件保存抓包、日志和 Action 公共模块，`trafficIngestor/url_list_collector/` 保存 Scrapy URL 收集项目。非 Clash 单 CSV 配置位于 `trafficIngestor/single_csv/`，通过 `python trafficIngestor/host_scheduler/single_csv_profiles.py <配置文件路径>` 加载；Clash 模板和节点配置位于 `configs/clash/`。输入 CSV 和数据维护脚本集中在 `scripts/`，运行工作区统一写入 `runtime/`。
 
 ## 构建、测试与开发命令
 优先先做语法校验，再跑最小范围验证：
 
 ```powershell
 python -m py_compile trafficIngestor\tools\base_action.py trafficIngestor\tools\browsers\firefox.py trafficIngestor\traffic_capture_single_csv\action.py
-python -m py_compile trafficIngestor\tools\browsers\chrome.py trafficIngestor\trafficIngestor\base_traffic_ingestor.py trafficIngestor\trafficIngestor\csv_ingestor_common.py trafficIngestor\trafficIngestor\single_csv_profiles.py trafficIngestor\single_csv\base.py
-python trafficIngestor\trafficIngestor\single_csv_profiles.py trafficIngestor\single_csv\base.py
-python trafficIngestor\trafficIngestor\get_url_list.py
+python -m py_compile trafficIngestor\tools\browsers\chrome.py trafficIngestor\host_scheduler\base_traffic_ingestor.py trafficIngestor\host_scheduler\csv_ingestor_common.py trafficIngestor\host_scheduler\single_csv_profiles.py trafficIngestor\single_csv\base.py
+python trafficIngestor\host_scheduler\single_csv_profiles.py trafficIngestor\single_csv\base.py
+python trafficIngestor\host_scheduler\get_url_list.py
 ```
 
 `py_compile` 是最基本检查。后三个入口脚本会触发 Docker、浏览器驱动和抓包链路，仅在本机已具备 `docker`、浏览器二进制、驱动和 `tcpdump` 时运行。

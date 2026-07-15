@@ -6,6 +6,7 @@ from single_csv._common import PROJECT_ROOT
 
 
 CONFIG = {
+    "DELETE_CSV_RECORD_ON_SUCCESS": True,
     "BASE_DST": "/netdisk/mlj/urls_tls13_hybrid_top100/20260617/",
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,

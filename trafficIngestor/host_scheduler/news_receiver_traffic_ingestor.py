@@ -39,7 +39,7 @@ if _source_root not in sys.path:
     sys.path.insert(0, _source_root)
 
 
-from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
+from host_scheduler.base_traffic_ingestor import BaseTrafficIngestor
 
 def get_real_username() -> str:
     """获取当前登录用户名"""

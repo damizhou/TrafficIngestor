@@ -6,6 +6,7 @@ from single_csv._common import PROJECT_ROOT
 
 
 CONFIG = {
+    "DELETE_CSV_RECORD_ON_SUCCESS": True,
     "BASE_DST": "/netdisk/github_with_ssl_key/lyl",
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,

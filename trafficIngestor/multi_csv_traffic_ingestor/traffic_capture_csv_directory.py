@@ -18,7 +18,7 @@ from typing import Any, Deque, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
+from host_scheduler.base_traffic_ingestor import BaseTrafficIngestor
 
 
 # ============== 运行配置 ==============

@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Type
 
-from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor
+from host_scheduler.base_traffic_ingestor import BaseTrafficIngestor
 
 
 @dataclass(frozen=True)
@@ -61,6 +61,9 @@ class CsvTaskSourceMixin:
         paths: Dict[str, str],
     ) -> None:
         del paths
+        if not self.DELETE_CSV_RECORD_ON_SUCCESS:
+            return
+
         guard_value = task.get(self.SUCCESS_DELETE_GUARD_FIELD, "")
         if not guard_value:
             return

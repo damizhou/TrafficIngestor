@@ -1,4 +1,4 @@
-"""强制使用 DoH 与 ECH 的 Firefox 驱动变体。"""
+"""强制使用 DoH/ECH 并禁用 HTTP/3/QUIC 的 Firefox 驱动变体。"""
 
 import os
 
@@ -43,12 +43,15 @@ def build_firefox_ech_preferences(doh_uri=FIREFOX_ECH_DOH_URI,
         "network.trr.uri": doh_uri,
         "network.trr.custom_uri": doh_uri,
         "network.dns.echconfig.enabled": True,
-        "network.dns.http3_echconfig.enabled": True,
+        "network.dns.http3_echconfig.enabled": False,
         "network.dns.force_waiting_https_rr": True,
         "network.dns.use_https_rr_as_altsvc": True,
         "network.dns.native_https_query": False,
         "network.dns.echconfig.fallback_to_origin_when_all_failed": False,
         "security.tls.ech.grease_probability": 0,
+        "network.http.http3.enabled": False,
+        "network.http.http3.enable_kyber": False,
+        "network.http.altsvc.enabled": False,
     }
     if bootstrap_address:
         preferences["network.trr.bootstrapAddress"] = bootstrap_address
