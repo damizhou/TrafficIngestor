@@ -39,10 +39,9 @@ except ModuleNotFoundError:
 CURRENT_DIR: str = os.path.dirname(os.path.abspath(__file__))
 SOURCE_ROOT: str = os.path.dirname(CURRENT_DIR)
 PROJECT_ROOT: str = os.path.dirname(SOURCE_ROOT)
-if SOURCE_ROOT not in sys.path:
-    sys.path.insert(0, SOURCE_ROOT)
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+for import_root in (PROJECT_ROOT, SOURCE_ROOT):
+    if import_root not in sys.path:
+        sys.path.insert(0, import_root)
 
 
 def get_real_username() -> str:
@@ -117,8 +116,9 @@ class BaseTrafficIngestor(ABC):
     NORMALIZE_SUCCESS_OUTPUT_MODES: bool = True
     SUCCESS_OUTPUT_DIR_MODE: int = 0o775
     SUCCESS_OUTPUT_FILE_MODE: int = 0o664
-    RESULT_DOMAIN_ROOT_DIR: str = ""
-    TASK_CSV_DATA_ROOT_LAYOUT: bool = False
+    RESULT_DOMAIN_ROOT_DIR: str = "data"
+    TASK_CSV_DATA_ROOT_LAYOUT: bool = True
+    SUCCESS_DELETE_GUARD_FIELD: str = "url"
     CLEANUP_WAIT_SECONDS_ON_INCOMPLETE: float = 60.0
     WORKER_QUEUE_WAIT_TIMEOUT: float = 0.0
 

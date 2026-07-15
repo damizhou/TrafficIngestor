@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-将 x_url.txt 转为 traffic ingestor 使用的 id,url,domain CSV。
+将 x_url.txt 转为 trafficIngestor ingestor 使用的 id,url,domain CSV。
 
 默认：
 - 输入: scripts/origin/ech_top10.txt

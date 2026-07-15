@@ -22,10 +22,9 @@ from typing import Any, Dict, List, Optional, Tuple
 _current_dir: str = os.path.dirname(os.path.abspath(__file__))
 _source_root: str = os.path.dirname(_current_dir)
 _project_root: str = os.path.dirname(_source_root)
-if _source_root not in sys.path:
-    sys.path.insert(0, _source_root)
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
+for import_root in (_project_root, _source_root):
+    if import_root not in sys.path:
+        sys.path.insert(0, import_root)
 
 from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor, get_real_username
 

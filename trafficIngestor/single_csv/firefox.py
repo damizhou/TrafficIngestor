@@ -2,7 +2,7 @@
 
 import os
 
-from configs.single_csv._common import PROJECT_ROOT, RUN_UP_TO_FIVE
+from single_csv._common import PROJECT_ROOT
 
 
 CONFIG = {
@@ -11,7 +11,6 @@ CONFIG = {
     "DOCKER_IMAGE": "chuanzhoupan/trace_spider_firefox:251104",
     "BROWSER_NAME": "firefox",
     "BROWSER_VERSION_COMMANDS": (("firefox", "--version"),),
-    "RETRY": 5,
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",
@@ -19,6 +18,5 @@ CONFIG = {
         "urls_tls13_hybrid_top200.csv",
     ),
 }
-RUN_POLICY = RUN_UP_TO_FIVE
 RUNTIME_NAME = "traffic_capture_single_csv_firefox"
 ACTION_PROFILE = "firefox"

@@ -209,7 +209,7 @@ def run_profile(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run a Clash single-CSV traffic capture. "
+            "Run a Clash single-CSV trafficIngestor capture. "
             f"The default profile is {DEFAULT_PROFILE!r}."
         )
     )

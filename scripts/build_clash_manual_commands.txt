@@ -72,7 +72,7 @@ Get-Item E:\Study\Code\TrafficIngestor\vendor\clash-for-linux\bin\clash-linux-am
 # 11) Recreate the test container and rerun the collector.
 docker rm -f pcz_traffic_capture_single_csv_clash0
 Set-Location E:\Study\Code\TrafficIngestor
-python .\src\trafficIngestor_clash\single_csv_profiles.py clash
+python .\trafficIngestor\trafficIngestor_clash\single_csv_profiles.py clash
 
 # 12) After the run starts, check whether the outer TLS key log appears.
 docker exec -it pcz_traffic_capture_single_csv_clash0 /bin/bash

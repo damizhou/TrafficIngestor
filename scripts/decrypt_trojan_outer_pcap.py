@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Decrypt Trojan outer TLS traffic from a pcap + SSLKEYLOGFILE pair, then strip the
+Decrypt Trojan outer TLS trafficIngestor from a pcap + SSLKEYLOGFILE pair, then strip the
 Trojan request header from the first matching decrypted client segment.
 
 This tool depends on TShark's `follow,tls,hex,<stream>` output. It writes:
@@ -240,7 +240,7 @@ def iter_manifests(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Decrypt Trojan outer TLS traffic from a pcap/keylog pair.")
+    parser = argparse.ArgumentParser(description="Decrypt Trojan outer TLS trafficIngestor from a pcap/keylog pair.")
     parser.add_argument("pcap", help="Path to the Trojan outer pcap")
     parser.add_argument("keylog", help="Path to the matching Trojan outer SSLKEYLOGFILE")
     parser.add_argument("--stream", type=int, help="Optional explicit tls.stream id to process")

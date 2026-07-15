@@ -2,12 +2,11 @@
 
 import os
 
-from configs.single_csv._common import PROJECT_ROOT, RUN_UP_TO_FIVE
+from single_csv._common import PROJECT_ROOT
 
 
 CONFIG = {
     "BASE_DST": "/netdisk/mlj/urls_tls12_top100/20260605/",
-    "RETRY": 5,
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",
@@ -15,6 +14,5 @@ CONFIG = {
         "urls_tls12_top100.csv",
     ),
 }
-RUN_POLICY = RUN_UP_TO_FIVE
 RUNTIME_NAME = "traffic_capture_single_csv_bsky"
 ACTION_PROFILE = "chrome"

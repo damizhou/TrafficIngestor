@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""批量将社交平台 URL 文本转换为 traffic ingestor 使用的 CSV。"""
+"""批量将社交平台 URL 文本转换为 trafficIngestor ingestor 使用的 CSV。"""
 
 from __future__ import annotations
 

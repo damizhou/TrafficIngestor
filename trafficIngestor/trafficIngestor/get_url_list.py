@@ -29,7 +29,7 @@ from urllib.parse import urlparse
 from tqdm import tqdm
 
 # 添加源码根目录到路径
-# 当前脚本所在目录的绝对路径（src/trafficIngestor/）
+# 当前脚本所在目录的绝对路径（trafficIngestor/trafficIngestor/）
 _current_dir: str = os.path.dirname(os.path.abspath(__file__))
 _source_root: str = os.path.dirname(_current_dir)
 # 仓库根目录的绝对路径（TrafficIngestor/）

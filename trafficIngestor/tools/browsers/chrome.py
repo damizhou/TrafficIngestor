@@ -256,7 +256,7 @@ def _install_chrome_managed_policy(policy, logger=None):
     if not is_docker():
         return
 
-    policy_path = Path("/etc/opt/chrome/policies/managed/traffic-ingestor-disable-background.json")
+    policy_path = Path("/etc/opt/chrome/policies/managed/trafficIngestor-ingestor-disable-background.json")
     content = json.dumps(policy, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
     try:
@@ -270,7 +270,7 @@ def _install_chrome_managed_policy(policy, logger=None):
 
 def _create_chrome_profile_dir(local_state, logger=None):
     """为每次采集创建干净 profile，避免复用状态触发账号/同步/推送后台服务。"""
-    profile_dir = tempfile.mkdtemp(prefix="traffic-ingestor-chrome-profile-")
+    profile_dir = tempfile.mkdtemp(prefix="trafficIngestor-ingestor-chrome-profile-")
     try:
         Path(profile_dir, "Local State").write_text(
             json.dumps(local_state, ensure_ascii=False, indent=2, sort_keys=True) + "\n",

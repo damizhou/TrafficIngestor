@@ -11,7 +11,7 @@
 示例：
 - python scripts/code/copy_subpages_temp_csv.py
 - python scripts/code/copy_subpages_temp_csv.py --dry-run
-- python scripts/code/copy_subpages_temp_csv.py --src-root /a/subpages_temp --dst-root /b/subpages
+- python scripts/code/copy_subpages_temp_csv.py --trafficIngestor-root /a/subpages_temp --dst-root /b/subpages
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument(
-        "--src-root",
+        "--trafficIngestor-root",
         default=str(DEFAULT_SRC_ROOT),
         help=f"CSV 源根目录，默认：{DEFAULT_SRC_ROOT}",
     )

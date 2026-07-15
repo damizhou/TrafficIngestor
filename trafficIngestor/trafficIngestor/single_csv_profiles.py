@@ -14,7 +14,7 @@ from typing import Mapping, Type
 
 _source_root = str(Path(__file__).resolve().parent.parent)
 _project_root = str(Path(_source_root).parent)
-for _import_root in (_source_root, _project_root):
+for _import_root in (_project_root, _source_root):
     if _import_root not in sys.path:
         sys.path.insert(0, _import_root)
 
@@ -24,6 +24,14 @@ from trafficIngestor.csv_ingestor_common import (
     RunPolicy,
     build_profile_ingestor,
     run_with_policy,
+)
+
+
+RUN_POLICY = RunPolicy(
+    max_runs=5,
+    delay_seconds=1200,
+    stop_on_false=True,
+    require_pending_jobs=True,
 )
 
 
@@ -86,10 +94,6 @@ def load_profile_definition(config_path: str | Path) -> ProfileDefinition:
     if not isinstance(config, Mapping):
         raise TypeError(f"配置文件 {source_path} 的 CONFIG 必须是映射类型")
 
-    run_policy = _required_module_value(module, "RUN_POLICY", source_path)
-    if not isinstance(run_policy, RunPolicy):
-        raise TypeError(f"配置文件 {source_path} 的 RUN_POLICY 必须是 RunPolicy")
-
     runtime_name = _required_module_value(module, "RUNTIME_NAME", source_path)
     if not isinstance(runtime_name, str) or not runtime_name.strip():
         raise TypeError(f"配置文件 {source_path} 的 RUNTIME_NAME 必须是非空字符串")
@@ -100,7 +104,7 @@ def load_profile_definition(config_path: str | Path) -> ProfileDefinition:
 
     return ProfileDefinition(
         profile_name=source_path.stem,
-        profile=CsvIngestorProfile(dict(config), run_policy),
+        profile=CsvIngestorProfile(dict(config), RUN_POLICY),
         runtime_name=runtime_name,
         action_profile=action_profile,
         source_path=source_path,
@@ -116,7 +120,7 @@ def build_ingestor(
     profile_attributes["ACTION_PROFILE"] = definition.action_profile
     configured_profile = CsvIngestorProfile(
         profile_attributes,
-        definition.profile.run_policy,
+        RUN_POLICY,
     )
     return build_profile_ingestor(
         BaseTrafficIngestor,
@@ -132,7 +136,7 @@ def run_profile(
     definition: ProfileDefinition,
     ingestor_class: Type[BaseTrafficIngestor],
 ) -> None:
-    run_with_policy(ingestor_class, definition.profile.run_policy)
+    run_with_policy(ingestor_class, RUN_POLICY)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -142,7 +146,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "config_path",
         type=Path,
-        help="Python config file, for example configs/single_csv/base.py.",
+        help="Python config file, for example trafficIngestor/single_csv/base.py.",
     )
     return parser.parse_args(argv)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""将 GitHub 仓库清单转换为 traffic ingestor 使用的 CSV。"""
+"""将 GitHub 仓库清单转换为 trafficIngestor ingestor 使用的 CSV。"""
 
 from __future__ import annotations
 

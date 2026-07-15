@@ -40,7 +40,6 @@ class CsvTaskSourceMixin:
     """复用单 CSV 任务读取、成功删行和单轮退出逻辑。"""
 
     CSV_PATH: str
-    SUCCESS_DELETE_GUARD_FIELD: str = "row_id"
     _has_jobs: bool
 
     def __init__(self) -> None:
