@@ -1,21 +1,21 @@
 # 仓库指南
 
-最后更新：2026-07-15 15:59:27
+最后更新：2026-07-15 16:38:01
 
 ## 项目概览
 本仓库用于批量采集网页访问流量与页面内容，核心流程是由宿主机脚本调度 Docker 容器，在容器内驱动 Chrome、Edge、Firefox 或 Scrapy 执行任务，并输出 `pcap`、TLS 密钥日志、HTML、截图等结果。新增功能或修复问题时，优先判断改动属于“宿主机调度层”、“容器内执行层”还是“URL 收集层”，避免修改范围扩散。
 
 ## 项目结构与模块组织
-`trafficIngestor/` 保存宿主机侧调度脚本，负责管理 Docker 容器池、分发任务、汇总抓包结果。非 Clash 单 CSV 配置位于根目录 `single_csv_configs/`，一个配置一个文件，通过 `python trafficIngestor/single_csv_profiles.py <配置文件路径>` 加载并运行；Clash 单 CSV 任务仍通过 `trafficIngestor_clash/single_csv_profiles.py` 启动。`tools/` 是公共工具层，包含浏览器驱动、`tcpdump` 抓包、日志、`BaseAction` 与 `BaseTrafficIngestor` 等复用逻辑。Chrome、Edge、Firefox、Firefox Disable 及其 Clash 变体共用 `traffic_capture_single_csv/action.py`，由宿主 profile 传入 action 模式。`url_list_collector/` 是 Scrapy 子项目，用于采集候选 URL。输入 CSV、测试数据和数据维护脚本主要放在 `small_tools/`，其中可执行维护脚本集中在 `small_tools/code/`。
+`src/` 是源码根目录：`src/trafficIngestor/` 和 `src/trafficIngestor_clash/` 保存宿主机调度脚本，`src/traffic_capture_single_csv/` 与 `src/traffic_capture_single_db/` 保存容器执行入口，`src/tools/` 保存浏览器、抓包和日志公共模块，`src/url_list_collector/` 保存 Scrapy URL 收集项目。非 Clash 单 CSV 配置位于 `configs/single_csv/`，通过 `python src/trafficIngestor/single_csv_profiles.py <配置文件路径>` 加载；Clash 模板和节点配置位于 `configs/clash/`。输入 CSV 和数据维护脚本集中在 `scripts/`，运行工作区统一写入 `runtime/`。
 
 ## 构建、测试与开发命令
 优先先做语法校验，再跑最小范围验证：
 
 ```powershell
-python -m py_compile tools\base_action.py tools\firefox.py traffic_capture_single_csv\action.py
-python -m py_compile tools\chrome.py trafficIngestor\base_traffic_ingestor.py trafficIngestor\csv_ingestor_common.py trafficIngestor\single_csv_profiles.py single_csv_configs\base.py
-python trafficIngestor\single_csv_profiles.py single_csv_configs\base.py
-python trafficIngestor\get_url_list.py
+python -m py_compile src\tools\base_action.py src\tools\firefox.py src\traffic_capture_single_csv\action.py
+python -m py_compile src\tools\chrome.py src\trafficIngestor\base_traffic_ingestor.py src\trafficIngestor\csv_ingestor_common.py src\trafficIngestor\single_csv_profiles.py configs\single_csv\base.py
+python src\trafficIngestor\single_csv_profiles.py configs\single_csv\base.py
+python src\trafficIngestor\get_url_list.py
 ```
 
 `py_compile` 是最基本检查。后三个入口脚本会触发 Docker、浏览器驱动和抓包链路，仅在本机已具备 `docker`、浏览器二进制、驱动和 `tcpdump` 时运行。
@@ -24,7 +24,7 @@ python trafficIngestor\get_url_list.py
 使用 Python 现有风格：4 空格缩进，函数与变量使用 `snake_case`，类使用 `PascalCase`，常量使用全大写。新增逻辑优先挂到 `BaseAction` 或 `BaseTrafficIngestor` 的钩子上，不要复制已有调度流程。路径、镜像名、阈值、浏览器参数应集中为常量，避免散落硬编码。
 
 ## 测试要求
-仓库当前没有正式的 `pytest` 测试体系。每次修改后，至少对改动文件运行 `python -m py_compile`，再补一个定向冒烟验证，例如使用 `small_tools/test.csv` 跑一次 Firefox 单站点采集，或用缩小版 CSV 跑一次 URL 收集流程。若无法实跑，需明确说明缺失的运行条件和风险。
+仓库当前没有正式的 `pytest` 测试体系。每次修改后，至少对改动文件运行 `python -m py_compile`，再补一个定向冒烟验证，例如使用 `scripts/test.csv` 跑一次 Firefox 单站点采集，或用缩小版 CSV 跑一次 URL 收集流程。若无法实跑，需明确说明缺失的运行条件和风险。
 
 ## 提交与合并请求规范
 提交信息遵循当前历史风格，使用简短、直接的中文动宾句，例如 `优化 Firefox 抓包时序`、`新增 Edge 预热逻辑`。一次提交只处理一个明确问题。PR 需要说明目的、影响目录、验证命令、依赖环境，以及是否修改了 Docker 镜像、挂载路径、输出目录或清理逻辑。
