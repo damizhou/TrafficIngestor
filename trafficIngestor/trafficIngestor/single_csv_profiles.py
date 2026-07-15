@@ -101,6 +101,20 @@ def load_profile_definition(config_path: str | Path) -> ProfileDefinition:
     action_profile = _required_module_value(module, "ACTION_PROFILE", source_path)
     if not isinstance(action_profile, str) or not action_profile.strip():
         raise TypeError(f"配置文件 {source_path} 的 ACTION_PROFILE 必须是非空字符串")
+    action_profile = action_profile.strip().replace("\\", "/")
+    relative_action_path = Path(action_profile)
+    browser_root = Path(_source_root, "tools", "browsers").resolve()
+    action_path = Path(_source_root, relative_action_path).resolve()
+    if (
+        relative_action_path.is_absolute()
+        or not action_path.is_relative_to(browser_root)
+        or action_path.suffix.lower() != ".py"
+        or not action_path.is_file()
+    ):
+        raise ValueError(
+            f"配置文件 {source_path} 的 ACTION_PROFILE 必须指向源码根目录下存在的 Python 文件: "
+            f"{action_profile}"
+        )
 
     return ProfileDefinition(
         profile_name=source_path.stem,

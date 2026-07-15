@@ -15,4 +15,4 @@ CONFIG = {
     ),
 }
 RUNTIME_NAME = "github_traffic"
-ACTION_PROFILE = "chrome"
+ACTION_PROFILE = "tools/browsers/chrome.py"

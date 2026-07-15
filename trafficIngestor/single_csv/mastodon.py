@@ -15,4 +15,4 @@ CONFIG = {
     ),
 }
 RUNTIME_NAME = "traffic_capture_single_csv_mastodon"
-ACTION_PROFILE = "chrome"
+ACTION_PROFILE = "tools/browsers/chrome.py"

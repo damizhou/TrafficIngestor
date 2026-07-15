@@ -16,7 +16,7 @@ _project_root: str = os.path.dirname(_current_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from tools.chrome import (
+from tools.browsers.chrome import (
     add_cookies,
     build_browser_error_diagnostics,
     create_chrome_driver,

@@ -21,6 +21,7 @@ from tools.base_action import BaseAction
 
 @dataclass(frozen=True)
 class ActionProfile:
+    module_path: str
     backend: str
     browser_name: str
     use_clash_proxy: bool = False
@@ -28,23 +29,55 @@ class ActionProfile:
 
 
 ACTION_PROFILES = {
-    "chrome": ActionProfile("chrome", "Chrome"),
+    "tools/browsers/chrome.py": ActionProfile(
+        "tools/browsers/chrome.py",
+        "chrome",
+        "Chrome",
+    ),
     "chrome_clash": ActionProfile(
+        "tools/browsers/chrome.py",
         "chrome",
         "Chrome",
         use_clash_proxy=True,
         enable_clash_diagnostics=True,
     ),
-    "edge": ActionProfile("edge", "Edge"),
-    "edge_clash": ActionProfile("edge", "Edge", use_clash_proxy=True),
-    "firefox": ActionProfile("firefox", "Firefox"),
-    "firefox_disable": ActionProfile("firefox_disable", "Firefox"),
-    "firefox_clash": ActionProfile("firefox", "Firefox", use_clash_proxy=True),
+    "tools/browsers/edge.py": ActionProfile(
+        "tools/browsers/edge.py",
+        "edge",
+        "Edge",
+    ),
+    "edge_clash": ActionProfile(
+        "tools/browsers/edge.py",
+        "edge",
+        "Edge",
+        use_clash_proxy=True,
+    ),
+    "tools/browsers/firefox.py": ActionProfile(
+        "tools/browsers/firefox.py",
+        "firefox",
+        "Firefox",
+    ),
+    "tools/browsers/firefox_disable.py": ActionProfile(
+        "tools/browsers/firefox_disable.py",
+        "firefox_disable",
+        "Firefox",
+    ),
+    "firefox_clash": ActionProfile(
+        "tools/browsers/firefox.py",
+        "firefox",
+        "Firefox",
+        use_clash_proxy=True,
+    ),
 }
 
 
 def load_action_profile() -> ActionProfile:
-    profile_name = os.environ.get("TRAFFIC_ACTION_PROFILE", "chrome").strip().lower()
+    profile_name = os.environ.get(
+        "TRAFFIC_ACTION_PROFILE",
+        "tools/browsers/chrome.py",
+    ).strip().replace("\\", "/")
+    if not profile_name.endswith(".py"):
+        profile_name = profile_name.lower()
     try:
         return ACTION_PROFILES[profile_name]
     except KeyError as exc:
@@ -79,7 +112,8 @@ class ConfiguredCaptureAction(BaseAction):
     )
 
     def get_backend_module(self) -> ModuleType:
-        return importlib.import_module(f"tools.{PROFILE.backend}")
+        module_name = PROFILE.module_path.removesuffix(".py").replace("/", ".")
+        return importlib.import_module(module_name)
 
     def kill_browser_processes(self):
         backend = self.get_backend_module()

@@ -13,4 +13,4 @@ CONFIG = {
     "CSV_PATH": os.path.join(PROJECT_ROOT, "scripts", "wiki_edge.csv"),
 }
 RUNTIME_NAME = "traffic_capture_single_csv_edge"
-ACTION_PROFILE = "edge"
+ACTION_PROFILE = "tools/browsers/edge.py"

@@ -2,7 +2,7 @@
 
 import os
 
-from tools.firefox import (
+from tools.browsers.firefox import (
     create_firefox_driver as _create_firefox_driver,
     get_firefox_background_capture_exclude_hosts,
     kill_firefox_processes,

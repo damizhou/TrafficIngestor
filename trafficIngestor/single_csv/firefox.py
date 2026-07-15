@@ -19,4 +19,4 @@ CONFIG = {
     ),
 }
 RUNTIME_NAME = "traffic_capture_single_csv_firefox"
-ACTION_PROFILE = "firefox"
+ACTION_PROFILE = "tools/browsers/firefox.py"

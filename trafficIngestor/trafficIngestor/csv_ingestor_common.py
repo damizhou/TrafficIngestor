@@ -93,7 +93,7 @@ def build_profile_ingestor(
 
     attributes = dict(profile.class_attributes)
     attributes.setdefault("BASE_NAME", runtime_name)
-    attributes.setdefault("ACTION_PROFILE", "chrome")
+    attributes.setdefault("ACTION_PROFILE", "tools/browsers/chrome.py")
     attributes.setdefault("SYNC_DEFAULT_ACTION", True)
     attributes.update(
         {

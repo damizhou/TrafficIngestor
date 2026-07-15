@@ -1,6 +1,6 @@
 # TrafficIngestor
 
-最后更新：2026-07-15 17:03:09
+最后更新：2026-07-15 18:24:47
 
 ## 项目简介
 TrafficIngestor 用于批量采集网页访问流量与页面内容。宿主机脚本负责管理 Docker 容器池、分发任务；容器内脚本负责驱动浏览器或 Scrapy 执行访问，并输出抓包文件、TLS 密钥日志、HTML、截图和文本内容。
@@ -23,7 +23,8 @@ trafficIngestor/traffic_capture_single_db/
 trafficIngestor/multi_csv_traffic_ingestor/
                                     多 CSV 调度入口
 trafficIngestor/url_list_collector/ Scrapy URL 收集子项目
-trafficIngestor/tools/              公共浏览器、抓包、日志与 Action 基类
+trafficIngestor/tools/              公共抓包、日志与 Action 基类
+trafficIngestor/tools/browsers/     Chrome、Edge 与 Firefox 浏览器实现
 trafficIngestor/single_csv/         非 Clash 单 CSV 独立配置目录
 configs/clash/                      Clash 模板与节点配置
 configs/database/                   数据库配置
@@ -72,7 +73,7 @@ id,url,domain
 
 ### 2. 修改配置并直接运行
 
-非 Clash 任务必须显式传入配置文件路径。修改 `trafficIngestor/single_csv/base.py` 中的 `CONFIG`、`RUN_POLICY`、`RUNTIME_NAME` 或 `ACTION_PROFILE` 后执行：
+非 Clash 任务必须显式传入配置文件路径。修改 `trafficIngestor/single_csv/base.py` 中的 `CONFIG`、`RUNTIME_NAME` 或 `ACTION_PROFILE` 后执行：
 
 ```powershell
 python trafficIngestor/trafficIngestor/single_csv_profiles.py trafficIngestor/single_csv/base.py
@@ -122,11 +123,15 @@ python trafficIngestor/trafficIngestor_clash/single_csv_profiles.py clash
 ### CSV 采集任务
 原有 22 个单 CSV 宿主入口已经合并。实际任务读取、成功删行和外层循环策略由公共实现统一提供，配置位置为：
 
-- `trafficIngestor/single_csv/`：15 个非 Clash 配置，一个配置一个文件
+- `trafficIngestor/single_csv/`：14 个非 Clash 配置，一个配置一个文件
 - `trafficIngestor/trafficIngestor/single_csv_profiles.py`：非 Clash 指定配置文件的加载、校验与运行入口
 - `trafficIngestor/trafficIngestor_clash/single_csv_profiles.py`：7 个 Clash profile
 
-公共任务源和运行策略位于 `trafficIngestor/trafficIngestor/csv_ingestor_common.py`。非 Clash 配置文件必须定义 `CONFIG`、`RUN_POLICY`、`RUNTIME_NAME` 和 `ACTION_PROFILE`，运行时必须显式传入该 `.py` 文件的路径。每个配置显式保存运行命名空间，动态工作目录统一写入 `runtime/workspaces/`。
+公共任务源位于 `trafficIngestor/trafficIngestor/csv_ingestor_common.py`。非 Clash 配置文件只需定义 `CONFIG`、`RUNTIME_NAME` 和 `ACTION_PROFILE`，运行时必须显式传入该 `.py` 文件的路径。入口统一最多执行 5 轮，每轮间隔 1200 秒，仅在仍有待处理任务时等待下一轮。每个配置显式保存运行命名空间，动态工作目录统一写入 `runtime/workspaces/`。
+
+`RETRY = 5`、`RESULT_DOMAIN_ROOT_DIR = "data"`、`TASK_CSV_DATA_ROOT_LAYOUT = True` 和 `SUCCESS_DELETE_GUARD_FIELD = "url"` 已固定在 `BaseTrafficIngestor`，单 CSV 配置文件无需重复声明。
+
+`ACTION_PROFILE` 直接填写源码根目录下的浏览器 Python 文件路径，例如 `tools/browsers/chrome.py`、`tools/browsers/edge.py`、`tools/browsers/firefox.py` 或 `tools/browsers/firefox_disable.py`。入口会在启动前检查文件是否存在，不再使用 `chrome`、`edge` 等简称。
 
 Chrome、Edge、Firefox、Firefox Disable 及其 Clash 变体统一使用 `trafficIngestor/traffic_capture_single_csv/action.py`。宿主 profile 通过 `TRAFFIC_ACTION_PROFILE` 向容器传入浏览器后端和代理模式；运行前会把公共 action 同步到 `runtime/workspaces/` 中该 profile 的独立目录。
 
@@ -134,7 +139,7 @@ Chrome、Edge、Firefox、Firefox Disable 及其 Clash 变体统一使用 `traff
 - `BASE_DST`：最终输出目录
 - `CONTAINER_COUNT`：容器并发数
 - `DOCKER_IMAGE`：容器镜像；默认值在 `BaseTrafficIngestor` 中统一维护，只有 Edge / Firefox 等非默认镜像入口需要覆盖
-- `RETRY`：失败重试次数
+- `RETRY`：失败重试次数，当前由基类固定为 5
 - `DOCKER_NETWORK`：固定 IP 模式使用的 Docker 自定义网络名
 - `DOCKER_NETWORK_SUBNET_PREFIX`：固定 IP 模式的 Docker 子网前缀长度
 - `DOCKER_NETWORK_GATEWAY`：固定 IP 模式的 Docker 网关地址
@@ -228,7 +233,7 @@ setcap -r "$(command -v ethtool)"
 仓库当前没有正式的自动化测试套件。修改后至少执行：
 
 ```powershell
-python -m py_compile trafficIngestor\tools\base_action.py trafficIngestor\tools\chrome.py trafficIngestor\tools\edge.py trafficIngestor\tools\firefox.py trafficIngestor\traffic_capture_single_csv\action.py
+python -m py_compile trafficIngestor\tools\base_action.py trafficIngestor\tools\browsers\chrome.py trafficIngestor\tools\browsers\edge.py trafficIngestor\tools\browsers\firefox.py trafficIngestor\traffic_capture_single_csv\action.py
 ```
 
 如果改动涉及具体采集器，再对对应入口跑一次最小冒烟验证。建议使用小规模 CSV，例如 `scripts/test.csv`，避免直接对大批量任务做首轮验证。
@@ -241,7 +246,7 @@ python -m py_compile trafficIngestor\tools\base_action.py trafficIngestor\tools\
 
 ## 常见注意事项
 
-- 浏览器路径和驱动路径主要写死在 `trafficIngestor/tools/chrome.py`、`trafficIngestor/tools/edge.py`、`trafficIngestor/tools/firefox.py`，更换镜像时要同步检查。
+- 浏览器路径和驱动路径主要写死在 `trafficIngestor/tools/browsers/chrome.py`、`trafficIngestor/tools/browsers/edge.py`、`trafficIngestor/tools/browsers/firefox.py`，更换镜像时要同步检查。
 - 抓包逻辑依赖 `tcpdump` 和 `pkill -f tcpdump`，受限环境中可能失败。
 - 调度脚本会创建和删除当前 profile 对应的容器池；Clash profile 使用显式运行命名空间隔离不同任务，避免互相清理容器或网络。
 - 输出目录大量使用 `/netdisk/...` 这类绝对路径，迁移环境时必须先改配置。

@@ -36,7 +36,6 @@ RUN_FIVE_WITH_HOURLY_WAIT = RunPolicy(
 # 普通 Clash 采集只需修改这个字典，然后直接运行本文件。
 CONFIG = {
     "BASE_DST": "/netdisk2/ww/trojan/top2000/homepage_only_10/260605",
-    "RETRY": 5,
     "DELETE_INVALID_FILES_ON_FAIL": False,
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
@@ -52,7 +51,6 @@ PROFILES = {
     "chrome": CsvIngestorProfile(
         {
             "BASE_DST": "/netdisk2/ww/trojan/wiki/260413/chrome",
-            "RETRY": 5,
             "DELETE_INVALID_FILES_ON_FAIL": False,
             "CSV_PATH": os.path.join(
                 PROJECT_ROOT,
@@ -66,7 +64,6 @@ PROFILES = {
     "chrome_subpage": CsvIngestorProfile(
         {
             "BASE_DST": "/netdisk2/ww/trojan/top2000/subpages_merged",
-            "RETRY": 5,
             "DELETE_INVALID_FILES_ON_FAIL": False,
             "CSV_PATH": os.path.join(
                 PROJECT_ROOT,
@@ -83,7 +80,6 @@ PROFILES = {
             "DOCKER_IMAGE": "chuanzhoupan/trace_spider_edge:260309",
             "BROWSER_NAME": "edge",
             "BROWSER_VERSION_COMMANDS": (("microsoft-edge", "--version"),),
-            "RETRY": 5,
             "CSV_PATH": os.path.join(
                 PROJECT_ROOT,
                 "scripts",
@@ -99,7 +95,6 @@ PROFILES = {
             "DOCKER_IMAGE": "chuanzhoupan/trace_spider_firefox:251104",
             "BROWSER_NAME": "firefox",
             "BROWSER_VERSION_COMMANDS": (("firefox", "--version"),),
-            "RETRY": 5,
             "CSV_PATH": os.path.join(
                 PROJECT_ROOT,
                 "scripts",
@@ -116,7 +111,6 @@ PROFILES = {
             "BASE_DST": (
                 "/netdisk2/ww/trojan/top2000/homepage_only/260518/chrome/fra"
             ),
-            "RETRY": 5,
             "DELETE_INVALID_FILES_ON_FAIL": False,
             "CSV_PATH": os.path.join(
                 PROJECT_ROOT,
@@ -134,7 +128,6 @@ PROFILES = {
             "BASE_DST": (
                 "/netdisk2/ww/trojan/top2000/homepage_only/260518/chrome/sgp"
             ),
-            "RETRY": 5,
             "DELETE_INVALID_FILES_ON_FAIL": False,
             "CSV_PATH": os.path.join(
                 PROJECT_ROOT,

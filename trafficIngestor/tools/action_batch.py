@@ -17,7 +17,7 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from tools.capture import capture, stop_capture, kill_tcpdump_processes
-from tools.chrome import create_chrome_driver, kill_chrome_processes
+from tools.browsers.chrome import create_chrome_driver, kill_chrome_processes
 from tools.logger import setup_logging
 
 

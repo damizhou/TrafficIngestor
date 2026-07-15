@@ -21,4 +21,4 @@ CONFIG = {
     ),
 }
 RUNTIME_NAME = "traffic_capture_single_csv_fixed_ip_europe"
-ACTION_PROFILE = "chrome"
+ACTION_PROFILE = "tools/browsers/chrome.py"

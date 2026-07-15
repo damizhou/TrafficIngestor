@@ -19,4 +19,4 @@ CONFIG = {
     ),
 }
 RUNTIME_NAME = "traffic_capture_single_csv_firefox_disable"
-ACTION_PROFILE = "firefox_disable"
+ACTION_PROFILE = "tools/browsers/firefox_disable.py"

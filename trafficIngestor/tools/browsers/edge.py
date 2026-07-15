@@ -15,11 +15,11 @@ from selenium.webdriver.edge.service import Service
 
 # 添加项目根目录到路径
 _current_dir: str = os.path.dirname(os.path.abspath(__file__))
-_project_root: str = os.path.dirname(_current_dir)
+_project_root: str = os.path.dirname(os.path.dirname(_current_dir))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from tools.chrome import (
+from tools.browsers.chrome import (
     add_cookies,
     open_url_and_save_content,
     screenshot_full_page,
