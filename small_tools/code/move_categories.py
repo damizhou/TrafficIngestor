@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""
+"""数据集类别筛选与迁移工具。
+
 脚本功能：
 1. 检查 /netdisk/dataset/ablation_study/batch/ 下所有类别中 pcap 文件夹的总体积
 2. 保留体积最大的前100个类别

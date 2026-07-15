@@ -28,6 +28,7 @@ from trafficIngestor.base_traffic_ingestor import BaseTrafficIngestor, get_real_
 
 
 class BaseClashTrafficIngestor(BaseTrafficIngestor):
+    RUNTIME_NAMESPACE: str = ""
     CLASH_HOST_PATH: str = os.path.join(_project_root, "clash-for-linux")
     CLASH_TEMPLATE_CONFIG_PATH: str = os.path.join(_project_root, "config", "config.yaml")
     CLASH_RUNTIME_DIR_NAME: str = "clash_runtime"
@@ -59,14 +60,16 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
         self._vpns = self._load_vpns()
 
     def get_default_action_source(self) -> Path:
-        """Fallback to the Clash action when HOST_CODE_PATH/action.py is missing."""
-        return Path(_project_root) / "traffic_capture_single_csv_clash" / "action.py"
+        """Return the shared, profile-driven browser action."""
+        return Path(_project_root) / "traffic_capture_single_csv" / "action.py"
 
     def build_runtime_namespace(self) -> str:
         """Derive a safe runtime namespace from env or the entry script name."""
         requested = os.environ.get(self.RUNTIME_NAME_ENV, "").strip()
         if requested:
             raw_name = requested
+        elif self.RUNTIME_NAMESPACE:
+            raw_name = self.RUNTIME_NAMESPACE
         elif self._runtime_entry_script is not None:
             raw_name = self._runtime_entry_script.stem
         else:

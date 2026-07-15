@@ -1,20 +1,20 @@
 # 仓库指南
 
-最后更新：2026-07-15 10:16:10
+最后更新：2026-07-15 15:59:27
 
 ## 项目概览
 本仓库用于批量采集网页访问流量与页面内容，核心流程是由宿主机脚本调度 Docker 容器，在容器内驱动 Chrome、Edge、Firefox 或 Scrapy 执行任务，并输出 `pcap`、TLS 密钥日志、HTML、截图等结果。新增功能或修复问题时，优先判断改动属于“宿主机调度层”、“容器内执行层”还是“URL 收集层”，避免修改范围扩散。
 
 ## 项目结构与模块组织
-`trafficIngestor/` 保存宿主机侧调度脚本，负责管理 Docker 容器池、分发任务、汇总抓包结果。`tools/` 是公共工具层，包含浏览器驱动、`tcpdump` 抓包、日志、`BaseAction` 与 `BaseTrafficIngestor` 等复用逻辑。`traffic_capture_single_csv_firefox/`、`traffic_capture_single_csv_edge/`、`traffic_capture_single_csv/` 等目录是容器内运行目录，通常以 `action.py` 作为入口。`url_list_collector/` 是 Scrapy 子项目，用于采集候选 URL。输入 CSV 和临时辅助文件主要放在 `small_tools/`。
+`trafficIngestor/` 保存宿主机侧调度脚本，负责管理 Docker 容器池、分发任务、汇总抓包结果。非 Clash 单 CSV 配置位于根目录 `single_csv_configs/`，一个配置一个文件，通过 `python trafficIngestor/single_csv_profiles.py <配置文件路径>` 加载并运行；Clash 单 CSV 任务仍通过 `trafficIngestor_clash/single_csv_profiles.py` 启动。`tools/` 是公共工具层，包含浏览器驱动、`tcpdump` 抓包、日志、`BaseAction` 与 `BaseTrafficIngestor` 等复用逻辑。Chrome、Edge、Firefox、Firefox Disable 及其 Clash 变体共用 `traffic_capture_single_csv/action.py`，由宿主 profile 传入 action 模式。`url_list_collector/` 是 Scrapy 子项目，用于采集候选 URL。输入 CSV、测试数据和数据维护脚本主要放在 `small_tools/`，其中可执行维护脚本集中在 `small_tools/code/`。
 
 ## 构建、测试与开发命令
 优先先做语法校验，再跑最小范围验证：
 
 ```powershell
-python -m py_compile tools\base_action.py tools\firefox.py traffic_capture_single_csv_firefox\action.py
-python -m py_compile tools\chrome.py traffic_capture_single_csv\action.py trafficIngestor\traffic_capture_single_csv_base.py
-python trafficIngestor\traffic_capture_single_csv_firefox.py
+python -m py_compile tools\base_action.py tools\firefox.py traffic_capture_single_csv\action.py
+python -m py_compile tools\chrome.py trafficIngestor\base_traffic_ingestor.py trafficIngestor\csv_ingestor_common.py trafficIngestor\single_csv_profiles.py single_csv_configs\base.py
+python trafficIngestor\single_csv_profiles.py single_csv_configs\base.py
 python trafficIngestor\get_url_list.py
 ```
 

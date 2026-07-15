@@ -92,6 +92,8 @@ class BaseTrafficIngestor(ABC):
         ("chromium", "--version"),
         ("chromium-browser", "--version"),
     )
+    ACTION_PROFILE: str = ""
+    SYNC_DEFAULT_ACTION: bool = False
     CONTAINER_CODE_PATH: str = "/app"
     CREATE_WITH_TTY: bool = True
     DOCKER_EXEC_TIMEOUT: int = 6000
@@ -1133,10 +1135,12 @@ class BaseTrafficIngestor(ABC):
             action_dst = host_code / "action.py"
             if action_dst.exists() and not action_dst.is_file():
                 raise IsADirectoryError(f"target action.py exists but is not a file: {action_dst}")
-            if not action_dst.exists():
+            should_copy = not action_dst.exists() or self.SYNC_DEFAULT_ACTION
+            same_path = action_src.resolve() == action_dst.resolve()
+            if should_copy and not same_path:
                 shutil.copy2(action_src, action_dst)
                 self.chown_recursive(str(action_dst))
-                self.log(f"copied default action.py to: {action_dst}")
+                self.log(f"synchronized default action.py to: {action_dst}")
 
         return host_code
 
@@ -2004,7 +2008,10 @@ if errors:
     # ============== 任务执行 ==============
     def get_docker_exec_env(self, task: Dict[str, str]) -> Dict[str, str]:
         """Return environment variables passed to docker exec for one task."""
-        return {}
+        del task
+        if not self.ACTION_PROFILE:
+            return {}
+        return {"TRAFFIC_ACTION_PROFILE": self.ACTION_PROFILE}
 
     def exec_once(self, task: Dict[str, str]) -> Tuple[bool, str]:
         """执行单个任务"""
