@@ -253,9 +253,7 @@ class ConfiguredCaptureAction(BaseAction):
         start_log_path = os.path.join(runtime_dir, "clash.start.log")
         outer_keylog_path = os.path.join(runtime_dir, "trojan_outer_sslkey.log")
         clash_log_path = os.path.join(
-            _current_dir,
-            "clash-for-linux",
-            "logs",
+            runtime_dir,
             "clash.log",
         )
 

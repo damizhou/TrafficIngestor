@@ -16,6 +16,7 @@ import re
 import shlex
 import shutil
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -50,6 +51,7 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
     CLASH_TLS_KEYLOG_TASK_OFFSET_KEY: str = "_trojan_outer_sslkey_start_offset"
     CLASH_READY_TIMEOUT: int = 60
     CLASH_START_TIMEOUT: int = 180
+    CLASH_INIT_MAX_WORKERS: int = 20
     CLASH_NODE_PLACEHOLDER_NAME: str = "vpnnodename"
     DELETE_INVALID_FILES_ON_FAIL: bool = True
     VPN_INFO_NAME: str = "vpns_info"
@@ -286,6 +288,11 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
     def get_clash_container_path(self) -> str:
         return f"{self.CONTAINER_CODE_PATH}/clash-for-linux"
 
+    def get_host_code_cleanup_preserved_subdirs(self) -> set[str]:
+        preserved = super().get_host_code_cleanup_preserved_subdirs()
+        preserved.add(self.CLASH_RUNTIME_DIR_NAME)
+        return preserved
+
     def get_clash_runtime_host_dir(self, name: str) -> Path:
         return Path(self.HOST_CODE_PATH) / self.CLASH_RUNTIME_DIR_NAME / name
 
@@ -516,9 +523,10 @@ stat -c %s "$SNAP"
         )
 
         names = super().prepare_pool_once()
-        for name in names:
-            self.sync_clash_files_to_container(name)
-            self.ensure_clash_ready(name)
+        max_workers = min(len(names), max(int(self.CLASH_INIT_MAX_WORKERS), 1))
+        self.log(f"并发启动 Clash: containers={len(names)} max_workers={max_workers}")
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            list(pool.map(self.ensure_clash_ready, names))
         return names
 
     def create_container(
@@ -538,6 +546,7 @@ stat -c %s "$SNAP"
             "--dns", "172.17.0.1",
             "--volume", f"{host_code_path}:{self.CONTAINER_CODE_PATH}",
             "--volume", f"{tools_path}:{self.CONTAINER_CODE_PATH}/tools",
+            "--volume", f"{self.CLASH_HOST_PATH}:{self.get_clash_container_path()}:ro",
             "-e", f"HOST_UID={uid}",
             "-e", f"HOST_GID={gid}",
             "-e", f"DELETE_INVALID_FILES_ON_FAIL={1 if self.DELETE_INVALID_FILES_ON_FAIL else 0}",
@@ -568,72 +577,6 @@ stat -c %s "$SNAP"
         else:
             self.log(f"created container: {name}")
 
-    def sync_clash_files_to_container(self, name: str) -> None:
-        clash_path = Path(self.CLASH_HOST_PATH)
-        clash_container_path = self.get_clash_container_path()
-        runtime_dir = self.get_clash_runtime_host_dir(name)
-        config_path = runtime_dir / "config.yaml"
-        country_mmdb = runtime_dir / "Country.mmdb"
-
-        if not clash_path.is_dir():
-            self.log(f"FATAL: clash-for-linux 目录不存在: {clash_path}")
-            sys.exit(2)
-        if not config_path.is_file():
-            self.log(f"FATAL: clash config 不存在: {config_path}")
-            sys.exit(2)
-        if not country_mmdb.is_file():
-            self.log(f"FATAL: Country.mmdb 不存在: {country_mmdb}")
-            sys.exit(2)
-
-        prepare_shell = f"""
-set -e
-mkdir -p "{self.CONTAINER_CODE_PATH}"
-rm -rf "{clash_container_path}"
-"""
-        cp = self.run_cmd(["docker", "exec", name, "bash", "-lc", prepare_shell])
-        if cp.returncode != 0:
-            detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
-            self.log(f"FATAL: {name} 准备 clash 目录失败: {detail}")
-            sys.exit(2)
-
-        copy_steps = [
-            (["docker", "cp", str(clash_path), f"{name}:{self.CONTAINER_CODE_PATH}"], "copy clash-for-linux"),
-            (["docker", "cp", str(config_path), f"{name}:{clash_container_path}/conf/config.yaml"], "copy config.yaml"),
-            (["docker", "cp", str(country_mmdb), f"{name}:{clash_container_path}/conf/Country.mmdb"], "copy Country.mmdb"),
-        ]
-        for cmd, desc in copy_steps:
-            cp = self.run_cmd(cmd)
-            if cp.returncode != 0:
-                detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
-                self.log(f"FATAL: {name} {desc} 失败: {detail}")
-                sys.exit(2)
-
-        normalize_shell = f"""
-set -e
-python - <<'PY'
-from pathlib import Path
-
-root = Path({clash_container_path!r})
-for path in root.rglob("*"):
-    if not path.is_file():
-        continue
-    if path.suffix == ".sh" or path.name == ".env":
-        data = path.read_bytes().replace(b"\\r\\n", b"\\n").replace(b"\\r", b"\\n")
-        path.write_bytes(data)
-
-(root / ".env").write_text(
-    "export CLASH_URL='http://127.0.0.1:1/unused'\\n"
-    "export CLASH_SECRET=''\\n",
-    encoding="utf-8",
-)
-PY
-"""
-        cp = self.run_cmd(["docker", "exec", name, "bash", "-lc", normalize_shell])
-        if cp.returncode != 0:
-            detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
-            self.log(f"FATAL: {name} normalize clash files failed: {detail}")
-            sys.exit(2)
-
     def ensure_clash_ready(self, name: str) -> None:
         clash_container_path = self.get_clash_container_path()
         runtime_dir = self.get_clash_runtime_container_dir(name)
@@ -642,10 +585,10 @@ PY
 set -e
 CLASH_DIR="{clash_container_path}"
 RUNTIME_DIR="{runtime_dir}"
-CONFIG_FILE="$CLASH_DIR/conf/config.yaml"
-MMDB_FILE="$CLASH_DIR/conf/Country.mmdb"
+CONFIG_FILE="$RUNTIME_DIR/config.yaml"
+MMDB_FILE="$RUNTIME_DIR/Country.mmdb"
 START_LOG="$RUNTIME_DIR/clash.start.log"
-LOG_FILE="$CLASH_DIR/logs/clash.log"
+LOG_FILE="$RUNTIME_DIR/clash.log"
 KEYLOG_FILE="{keylog_file}"
 
 mkdir -p "$RUNTIME_DIR"
@@ -669,14 +612,28 @@ fi
 
 rm -f "$START_LOG" "$LOG_FILE" "$KEYLOG_FILE"
 export SSLKEYLOGFILE="$KEYLOG_FILE"
-if ! bash "$CLASH_DIR/start.sh" >"$START_LOG" 2>&1; then
-    cat "$START_LOG" >&2 || true
-    cat "$LOG_FILE" >&2 || true
+case "$(uname -m)" in
+    x86_64|amd64) CLASH_BIN="$CLASH_DIR/bin/clash-linux-amd64" ;;
+    aarch64|arm64) CLASH_BIN="$CLASH_DIR/bin/clash-linux-arm64" ;;
+    armv7l|armv7) CLASH_BIN="$CLASH_DIR/bin/clash-linux-armv7" ;;
+    *) echo "unsupported CPU architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+if [ ! -x "$CLASH_BIN" ]; then
+    echo "clash binary is not executable: $CLASH_BIN" >&2
     exit 1
 fi
+nohup "$CLASH_BIN" -d "$RUNTIME_DIR" >"$LOG_FILE" 2>&1 &
+CLASH_PID=$!
+echo "started clash pid=$CLASH_PID binary=$CLASH_BIN config_dir=$RUNTIME_DIR" >"$START_LOG"
 
 for _ in $(seq 1 {self.CLASH_READY_TIMEOUT}); do
     python -c "import socket; s = socket.create_connection(('127.0.0.1', {self.CLASH_PORT}), timeout=1); s.close()" >/dev/null 2>&1 && exit 0
+    if ! kill -0 "$CLASH_PID" >/dev/null 2>&1; then
+        echo "clash process exited before becoming ready" >&2
+        cat "$START_LOG" >&2 || true
+        cat "$LOG_FILE" >&2 || true
+        exit 1
+    fi
     sleep 1
 done
 

@@ -1288,16 +1288,21 @@ if errors:
             self.log(f"WARN: HOST_CODE_PATH cleanup permission normalization failed: {errors[0]}")
         return False
 
+    def get_host_code_cleanup_preserved_subdirs(self) -> set[str]:
+        """Return HOST_CODE_PATH subdirectories that runtime cleanup must preserve."""
+        return {"tools"}
+
     def clear_host_code_subdirs(self) -> None:
-        """清理 HOST_CODE_PATH 下的临时子目录，保留 tools"""
+        """清理 HOST_CODE_PATH 下的临时子目录，保留运行所需目录。"""
         base_path = self.ensure_host_code_path_ready()
         if not base_path.exists() or not base_path.is_dir():
             self.log(f"WARN: HOST_CODE_PATH 不存在或不是目录：{base_path}")
             return
 
+        preserved = self.get_host_code_cleanup_preserved_subdirs()
         entries = [
             entry for entry in base_path.iterdir()
-            if entry.is_dir() and not entry.is_symlink() and entry.name != 'tools'
+            if entry.is_dir() and not entry.is_symlink() and entry.name not in preserved
         ]
         if not entries:
             return
@@ -1305,7 +1310,7 @@ if errors:
         self.normalize_host_code_cleanup_permissions(base_path)
 
         for entry in entries:
-            if entry.is_dir() and entry.name != 'tools':
+            if entry.is_dir() and entry.name not in preserved:
                 try:
                     shutil.rmtree(entry)
                     self.log(f"删除子目录: {entry}")

@@ -8,6 +8,7 @@ from single_csv._common import PROJECT_ROOT
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
     "BASE_DST": "/netdisk2/ww/trojan/github/20260720",
+    "CONTAINER_COUNT": 300,
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",
