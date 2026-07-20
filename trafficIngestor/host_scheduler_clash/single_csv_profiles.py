@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""加载指定的非 Clash 单 CSV 配置文件并运行采集任务。
+"""加载指定配置文件并运行 Clash 单 CSV 采集任务。
 
 使用方法：
-    python trafficIngestor/host_scheduler/single_csv_profiles.py <配置文件路径>
+    python trafficIngestor/host_scheduler_clash/single_csv_profiles.py <配置文件路径>
 
 示例：
-    python trafficIngestor/host_scheduler/single_csv_profiles.py trafficIngestor/single_csv/base.py
+    python trafficIngestor/host_scheduler_clash/single_csv_profiles.py trafficIngestor/single_csv/github_trojan.py
 
 配置文件必须定义 CONFIG、RUNTIME_NAME 和 ACTION_PROFILE。
 """
@@ -30,22 +30,19 @@ from host_scheduler.csv_ingestor_common import (
     ProfileDefinition,
     RunPolicy,
     build_profile_ingestor,
-    load_profile_definition as load_shared_profile_definition,
+    load_profile_definition,
     run_with_policy,
+)
+from host_scheduler_clash.base_clash_traffic_ingestor import (
+    BaseClashTrafficIngestor,
 )
 
 
 RUN_POLICY = RunPolicy(
     max_runs=5,
-    delay_seconds=1200,
-    stop_on_false=True,
-    require_pending_jobs=True,
+    delay_seconds=3600,
+    sleep_after_last_run=True,
 )
-
-
-def load_profile_definition(config_path: str | Path) -> ProfileDefinition:
-    """加载并校验命令行指定的单个配置文件。"""
-    return load_shared_profile_definition(config_path, RUN_POLICY)
 
 
 def build_ingestor(
@@ -54,13 +51,18 @@ def build_ingestor(
     class_name: str = "TrafficIngestor",
 ) -> Type[BaseTrafficIngestor]:
     profile_attributes = dict(definition.profile.class_attributes)
-    profile_attributes["ACTION_PROFILE"] = definition.action_profile
+    profile_attributes.update(
+        {
+            "ACTION_PROFILE": definition.action_profile,
+            "RUNTIME_NAMESPACE": definition.runtime_name,
+        }
+    )
     configured_profile = CsvIngestorProfile(
         profile_attributes,
         RUN_POLICY,
     )
     return build_profile_ingestor(
-        BaseTrafficIngestor,
+        BaseClashTrafficIngestor,
         class_name,
         module_name,
         definition.profile_name,
@@ -69,30 +71,27 @@ def build_ingestor(
     )
 
 
-def run_profile(
-    definition: ProfileDefinition,
-    ingestor_class: Type[BaseTrafficIngestor],
-) -> None:
+def run_profile(ingestor_class: Type[BaseTrafficIngestor]) -> None:
     run_with_policy(ingestor_class, RUN_POLICY)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run a non-Clash single-CSV capture from one config file."
+        description="Run a Clash single-CSV capture from one config file."
     )
     parser.add_argument(
         "config_path",
         type=Path,
-        help="Python config file, for example trafficIngestor/single_csv/base.py.",
+        help="Python config file, for example trafficIngestor/single_csv/github_trojan.py.",
     )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    definition = load_profile_definition(args.config_path)
+    definition = load_profile_definition(args.config_path, RUN_POLICY)
     ingestor_class = build_ingestor(definition, __name__)
-    run_profile(definition, ingestor_class)
+    run_profile(ingestor_class)
     return 0
 
 

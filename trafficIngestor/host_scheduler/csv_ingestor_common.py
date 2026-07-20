@@ -4,8 +4,12 @@
 
 from __future__ import annotations
 
+import importlib.util
+import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
+from types import ModuleType
 from typing import Any, Dict, Mapping, Type
 
 from host_scheduler.base_traffic_ingestor import BaseTrafficIngestor
@@ -34,6 +38,103 @@ class CsvIngestorProfile:
 
     class_attributes: Mapping[str, Any]
     run_policy: RunPolicy = RunPolicy()
+
+
+@dataclass(frozen=True)
+class ProfileDefinition:
+    """从指定 Python 文件加载出的完整单 CSV 配置。"""
+
+    profile_name: str
+    profile: CsvIngestorProfile
+    runtime_name: str
+    action_profile: str
+    source_path: Path
+
+
+def _required_module_value(
+    module: ModuleType,
+    field_name: str,
+    source_path: Path,
+) -> object:
+    try:
+        return getattr(module, field_name)
+    except AttributeError as exc:
+        raise ValueError(
+            f"配置文件 {source_path} 缺少必填字段 {field_name}"
+        ) from exc
+
+
+def _load_config_module(config_path: Path) -> ModuleType:
+    module_name = f"_traffic_ingestor_config_{config_path.stem}"
+    module_spec = importlib.util.spec_from_file_location(module_name, config_path)
+    if module_spec is None or module_spec.loader is None:
+        raise ImportError(f"无法加载配置文件: {config_path}")
+
+    module = importlib.util.module_from_spec(module_spec)
+    sys.modules[module_name] = module
+    try:
+        module_spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
+def load_profile_definition(
+    config_path: str | Path,
+    run_policy: RunPolicy,
+) -> ProfileDefinition:
+    """加载并校验 HTTPS 与 Clash 入口共用的单 CSV 配置文件。"""
+
+    source_path = Path(config_path).expanduser()
+    if not source_path.is_absolute():
+        source_path = Path.cwd() / source_path
+    source_path = source_path.resolve()
+
+    if source_path.suffix.lower() != ".py":
+        raise ValueError(f"配置文件必须使用 .py 扩展名: {source_path}")
+    if not source_path.is_file():
+        raise FileNotFoundError(f"配置文件不存在: {source_path}")
+
+    module = _load_config_module(source_path)
+    config = _required_module_value(module, "CONFIG", source_path)
+    if not isinstance(config, Mapping):
+        raise TypeError(f"配置文件 {source_path} 的 CONFIG 必须是映射类型")
+    delete_csv_record = config.get("DELETE_CSV_RECORD_ON_SUCCESS", True)
+    if not isinstance(delete_csv_record, bool):
+        raise TypeError(
+            f"配置文件 {source_path} 的 DELETE_CSV_RECORD_ON_SUCCESS 必须是布尔值"
+        )
+
+    runtime_name = _required_module_value(module, "RUNTIME_NAME", source_path)
+    if not isinstance(runtime_name, str) or not runtime_name.strip():
+        raise TypeError(f"配置文件 {source_path} 的 RUNTIME_NAME 必须是非空字符串")
+
+    action_profile = _required_module_value(module, "ACTION_PROFILE", source_path)
+    if not isinstance(action_profile, str) or not action_profile.strip():
+        raise TypeError(f"配置文件 {source_path} 的 ACTION_PROFILE 必须是非空字符串")
+    action_profile = action_profile.strip().replace("\\", "/")
+    relative_action_path = Path(action_profile)
+    browser_root = Path(BaseTrafficIngestor.SOURCE_ROOT, "tools", "browsers").resolve()
+    action_path = Path(BaseTrafficIngestor.SOURCE_ROOT, relative_action_path).resolve()
+    if (
+        relative_action_path.is_absolute()
+        or not action_path.is_relative_to(browser_root)
+        or action_path.suffix.lower() != ".py"
+        or not action_path.is_file()
+    ):
+        raise ValueError(
+            f"配置文件 {source_path} 的 ACTION_PROFILE 必须指向源码根目录下存在的 Python 文件: "
+            f"{action_profile}"
+        )
+
+    return ProfileDefinition(
+        profile_name=source_path.stem,
+        profile=CsvIngestorProfile(dict(config), run_policy),
+        runtime_name=runtime_name.strip(),
+        action_profile=action_profile,
+        source_path=source_path,
+    )
 
 
 class CsvTaskSourceMixin:

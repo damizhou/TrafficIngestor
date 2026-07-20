@@ -32,12 +32,12 @@ from host_scheduler.base_traffic_ingestor import BaseTrafficIngestor, get_real_u
 class BaseClashTrafficIngestor(BaseTrafficIngestor):
     RUNTIME_NAMESPACE: str = ""
     CLASH_HOST_PATH: str = os.path.join(
-        _project_root,
+        BaseTrafficIngestor.PROJECT_ROOT,
         "vendor",
         "clash-for-linux",
     )
     CLASH_TEMPLATE_CONFIG_PATH: str = os.path.join(
-        _project_root,
+        BaseTrafficIngestor.PROJECT_ROOT,
         "configs",
         "clash",
         "config.yaml",
@@ -72,7 +72,23 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
 
     def get_default_action_source(self) -> Path:
         """Return the shared, profile-driven browser action."""
-        return Path(_source_root) / "traffic_capture_single_csv" / "action.py"
+        return Path(self.SOURCE_ROOT) / "traffic_capture_single_csv" / "action.py"
+
+    def get_docker_exec_env(self, task: Dict[str, str]) -> Dict[str, str]:
+        """为统一 action 传递独立的浏览器路径与 Clash 行为开关。"""
+        env = super().get_docker_exec_env(task)
+        env.update(
+            {
+                "TRAFFIC_USE_CLASH_PROXY": "1",
+                "TRAFFIC_ENABLE_CLASH_DIAGNOSTICS": (
+                    "1" if self.BROWSER_NAME == "chrome" else "0"
+                ),
+                "DELETE_INVALID_FILES_ON_FAIL": (
+                    "1" if self.DELETE_INVALID_FILES_ON_FAIL else "0"
+                ),
+            }
+        )
+        return env
 
     def build_runtime_namespace(self) -> str:
         """Derive a safe runtime namespace from env or the entry script name."""
@@ -153,7 +169,7 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
         self._runtime_namespace = runtime_name
         self.BASE_NAME = runtime_name
         self.HOST_CODE_PATH = os.path.join(
-            _project_root,
+            self.PROJECT_ROOT,
             "runtime",
             "workspaces",
             runtime_name,
@@ -513,7 +529,7 @@ stat -c %s "$SNAP"
         container_ip: Optional[str] = None,
     ) -> None:
         uid, gid = str(os.getuid()), str(os.getgid())
-        tools_path = os.path.join(_project_root, "tools")
+        tools_path = os.path.join(self.SOURCE_ROOT, "tools")
 
         self.log(f"creating container: {name}")
         cmd = [
