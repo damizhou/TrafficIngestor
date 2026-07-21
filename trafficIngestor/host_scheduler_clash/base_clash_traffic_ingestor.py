@@ -15,6 +15,7 @@ import importlib
 import re
 import shlex
 import shutil
+import stat
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -291,6 +292,7 @@ class BaseClashTrafficIngestor(BaseTrafficIngestor):
     def get_host_code_cleanup_preserved_subdirs(self) -> set[str]:
         preserved = super().get_host_code_cleanup_preserved_subdirs()
         preserved.add(self.CLASH_RUNTIME_DIR_NAME)
+        preserved.add(Path(self.get_clash_container_path()).name)
         return preserved
 
     def get_clash_runtime_host_dir(self, name: str) -> Path:
@@ -342,6 +344,36 @@ fi
         if pcap_name:
             return f"{Path(pcap_name).stem}_trojan_outer_sslkey.log"
         return f"{name}_trojan_outer_sslkey.log"
+
+    def ensure_clash_binaries_executable(self) -> None:
+        """Ensure bind-mounted Clash cores retain executable permissions in containers."""
+        bin_dir = Path(self.CLASH_HOST_PATH) / "bin"
+        binary_names = (
+            "clash-linux-amd64",
+            "clash-linux-arm64",
+            "clash-linux-armv7",
+        )
+        available = 0
+        for binary_name in binary_names:
+            binary_path = bin_dir / binary_name
+            if not binary_path.is_file():
+                continue
+            available += 1
+            current_mode = binary_path.stat().st_mode
+            executable_mode = current_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+            if executable_mode != current_mode:
+                try:
+                    binary_path.chmod(executable_mode)
+                except OSError as exc:
+                    raise PermissionError(
+                        f"无法为 Clash core 添加执行权限: {binary_path}: {exc}"
+                    ) from exc
+                self.log(f"已补充 Clash core 执行权限: {binary_path}")
+            if os.name == "posix" and not os.access(binary_path, os.X_OK):
+                raise PermissionError(f"Clash core 添加执行权限后仍不可执行: {binary_path}")
+
+        if available == 0:
+            raise FileNotFoundError(f"Clash core 不存在: {bin_dir}")
 
     def build_clash_proxy_config(self, name: str) -> Dict[str, Any]:
         vpn = dict(self.get_vpn_for_container(name))
@@ -495,6 +527,11 @@ stat -c %s "$SNAP"
     def prepare_pool_once(self) -> List[str]:
         if not os.path.isdir(self.CLASH_HOST_PATH):
             self.log(f"FATAL: clash-for-linux 目录不存在: {self.CLASH_HOST_PATH}")
+            sys.exit(2)
+        try:
+            self.ensure_clash_binaries_executable()
+        except OSError as exc:
+            self.log(f"FATAL: Clash core 权限准备失败: {exc}")
             sys.exit(2)
 
         self.ensure_docker_available()

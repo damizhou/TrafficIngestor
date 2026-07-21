@@ -142,7 +142,7 @@ class BaseTrafficIngestor(ABC):
         self._copied_task_csv_path = ""
         self._execution_task_log_lock = threading.Lock()
         self._execution_task_log_path = ""
-        self._execution_task_sequence = 0
+        self._pending_console_log_lines: List[str] = []
 
         # 全局统计
         self._global_start_time = 0.0
@@ -173,9 +173,21 @@ class BaseTrafficIngestor(ABC):
             tqdm.write(msg)
         else:
             print(msg, flush=True)
+        self._append_console_log_line(msg)
+
+    def _append_console_log_line(self, line: str) -> None:
+        """Append one console line, buffering startup output until the log exists."""
+        with self._execution_task_log_lock:
+            if not self._execution_task_log_path:
+                self._pending_console_log_lines.append(line)
+                return
+            with open(self._execution_task_log_path, "a", encoding="utf-8") as log_file:
+                log_file.write(line)
+                log_file.write("\n")
+                log_file.flush()
 
     def initialize_execution_task_log(self) -> Optional[str]:
-        """Create one concise task lifecycle log for the current execution."""
+        """Create one console text log for the current execution."""
         csv_path = str(getattr(self, "CSV_PATH", "") or "").strip()
         if not csv_path:
             return None
@@ -201,63 +213,16 @@ class BaseTrafficIngestor(ABC):
 
         self.chown_path(candidate)
         self.normalize_success_output_path(candidate)
-        self._execution_task_log_path = candidate
-        self._write_execution_task_log(
-            "run_start",
-            base_dst=os.path.abspath(str(self.BASE_DST)),
-            csv_path=os.path.abspath(csv_path),
-        )
+        with self._execution_task_log_lock:
+            self._execution_task_log_path = candidate
+            with open(candidate, "a", encoding="utf-8") as log_file:
+                for line in self._pending_console_log_lines:
+                    log_file.write(line)
+                    log_file.write("\n")
+                log_file.flush()
+            self._pending_console_log_lines.clear()
         self.log(f"任务执行日志: {candidate}")
         return candidate
-
-    def _write_execution_task_log(self, event: str, **fields: Any) -> None:
-        """Append one JSON event to the current execution task log."""
-        if not self._execution_task_log_path:
-            return
-
-        record = {
-            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "event": event,
-        }
-        record.update(fields)
-        line = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
-        with self._execution_task_log_lock:
-            with open(self._execution_task_log_path, "a", encoding="utf-8") as log_file:
-                log_file.write(line)
-                log_file.write("\n")
-                log_file.flush()
-
-    def _write_task_start_log(self, task: Dict[str, Any]) -> None:
-        self._write_execution_task_log(
-            "task_start",
-            task_no=task.get("_task_log_no", 0),
-            id=task.get("row_id", ""),
-            url=task.get("url", ""),
-            domain=task.get("domain", ""),
-            container=task.get("container", ""),
-        )
-
-    def _write_task_end_log(
-        self,
-        task: Dict[str, Any],
-        *,
-        success: bool,
-        elapsed: float,
-        error: str = "",
-    ) -> None:
-        record = {
-            "task_no": task.get("_task_log_no", 0),
-            "id": task.get("row_id", ""),
-            "url": task.get("url", ""),
-            "domain": task.get("domain", ""),
-            "container": task.get("container", ""),
-            "status": "success" if success else "failed",
-            "attempts": int(task.get("_retry_count", 0)) + 1,
-            "elapsed_seconds": round(elapsed, 3),
-        }
-        if error:
-            record["error"] = self.compact_error(error, limit=1000)
-        self._write_execution_task_log("task_end", **record)
 
     @staticmethod
     def compact_error(error: Any, limit: int = 1600) -> str:
@@ -1247,7 +1212,7 @@ for name in os.listdir(root):
     if name in skip_names:
         continue
     path = os.path.join(root, name)
-    if os.path.islink(path) or not os.path.isdir(path):
+    if os.path.islink(path) or os.path.ismount(path) or not os.path.isdir(path):
         continue
     for current_root, dirs, files in os.walk(path, topdown=False, followlinks=False):
         for file_name in files:
@@ -1660,7 +1625,6 @@ if errors:
             "extra": extra_items,
         }
 
-        self._write_execution_task_log("completeness", **report)
         self.log(
             "任务完整度校验: "
             f"expected={expected_tasks}, matched={matched_tasks}, "
@@ -2268,12 +2232,6 @@ if errors:
         with self._stats_lock:
             stats["fail"] += 1
             stats["errors"].append((task, err))
-        self._write_task_end_log(
-            task,
-            success=False,
-            elapsed=task_elapsed,
-            error=err,
-        )
         self._update_progress(ok=False, task_elapsed=task_elapsed)
 
     def worker_loop(self, container: str, q: "queue.Queue[Dict[str, str]]",
@@ -2304,7 +2262,6 @@ if errors:
 
                 if attempt == 0:
                     self.log(f"{container} -> start [{row_id}] {url}")
-                    self._write_task_start_log(task)
                 else:
                     self.log(f"{container} -> retry {attempt}/{retry} [{row_id}] {url}")
 
@@ -2336,11 +2293,6 @@ if errors:
                     self.log(f"{container} -> done  [{row_id}] {url} ({task_elapsed:.1f}s)")
                     with self._stats_lock:
                         stats["ok"] += 1
-                    self._write_task_end_log(
-                        task,
-                        success=True,
-                        elapsed=task_elapsed,
-                    )
                     self._update_progress(ok=True, task_elapsed=task_elapsed)
                 else:
                     self.log(f"{container} -> fail  [{row_id}] {self.compact_error(err)}")
@@ -2390,8 +2342,6 @@ if errors:
         """执行一批任务"""
         q: "queue.Queue[Dict[str, str]]" = queue.Queue()
         for t in jobs:
-            self._execution_task_sequence += 1
-            t["_task_log_no"] = self._execution_task_sequence
             q.put(t)
 
         stats: Dict[str, Any] = {"ok": 0, "fail": 0, "errors": []}
@@ -2448,8 +2398,6 @@ if errors:
         self._global_total_jobs = 0
         self._runtime_prepared = False
         batch_num = 0
-        run_error = ""
-        completeness_report = None
 
         # 创建常驻进度条（total=None 表示未知总数）
         if tqdm is None:
@@ -2508,7 +2456,6 @@ if errors:
                     break
 
         except Exception as e:
-            run_error = repr(e)
             self.log(f"WARN: 执行异常：{e}")
         finally:
             # 关闭进度条
@@ -2516,7 +2463,7 @@ if errors:
                 self._pbar.close()
                 self._pbar = None
             try:
-                completeness_report = self.verify_task_completeness()
+                self.verify_task_completeness()
             except Exception as e:
                 self.log(f"WARN: 任务完整度校验失败：{e}")
             if self._runtime_prepared or self.should_cleanup_when_idle():
@@ -2535,32 +2482,6 @@ if errors:
         self.log(f"[最终汇总] 批次={batch_num} | 运行时间={elapsed_min:.1f}分钟 | 总数={total_jobs} | "
                  f"完成={total_done} | 剩余={remaining} | 预计剩余={eta_text} | "
                  f"成功={self._global_ok} | 失败={self._global_fail} | 每分钟={per_min:.2f} | 平均耗时={avg_time:.1f}秒")
-        run_end_record = {
-            "status": (
-                "failed"
-                if run_error
-                else "completed_with_failures"
-                if self._global_fail
-                else "completed"
-            ),
-            "total": total_jobs,
-            "success": self._global_ok,
-            "failed": self._global_fail,
-            "elapsed_seconds": round(elapsed, 3),
-            "remaining_eta_seconds": round(eta_seconds, 3),
-        }
-        if run_error:
-            run_end_record["error"] = self.compact_error(run_error, limit=1000)
-        if completeness_report is not None:
-            run_end_record.update(
-                {
-                    "expected_tasks": completeness_report["expected_tasks"],
-                    "matched_tasks": completeness_report["matched_tasks"],
-                    "missing_tasks": completeness_report["missing_tasks"],
-                    "completeness_percent": completeness_report["completeness_percent"],
-                }
-            )
-        self._write_execution_task_log("run_end", **run_end_record)
         return batch_num > 0
 
     def setup(self) -> None:

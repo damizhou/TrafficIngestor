@@ -23,7 +23,8 @@ from host_scheduler.base_traffic_ingestor import BaseTrafficIngestor
 
 # ============== 运行配置 ==============
 CSV_DIRECTORY = Path(BaseTrafficIngestor.PROJECT_ROOT) / "scripts" / "csvs"
-BASE_DST = Path("/netdisk/cl/260714")
+BASE_DST = Path("/netdisk/cl/260722")
+DOCKER_IMAGE = "chuanzhoupan/trace_spider:250912"
 DATA_SUBDIR = "data"
 LOGS_SUBDIR = "logs"
 CSV_GLOB_PATTERN = "*.csv"
@@ -49,6 +50,7 @@ class CsvSiteState:
 class MultiCsvTrafficIngestor(BaseTrafficIngestor):
     """按 CSV 优先级滚动填充任务窗口的采集器。"""
 
+    DOCKER_IMAGE = DOCKER_IMAGE
     RETRY = 0
     WORKER_QUEUE_WAIT_TIMEOUT = 0.5
     HOST_CODE_PATH = str(
