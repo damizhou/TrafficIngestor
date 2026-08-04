@@ -15,5 +15,4 @@ CONFIG = {
         "subpages_merged.csv",
     ),
 }
-RUNTIME_NAME = "traffic_capture_single_csv_chrome_subpage_clash"
 ACTION_PROFILE = "tools/browsers/chrome.py"

@@ -15,5 +15,4 @@ CONFIG = {
         "wiki_chrome.csv",
     ),
 }
-RUNTIME_NAME = "traffic_capture_single_csv_chrome_clash"
 ACTION_PROFILE = "tools/browsers/chrome.py"

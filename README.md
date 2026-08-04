@@ -1,6 +1,6 @@
 # TrafficIngestor
 
-最后更新：2026-07-20 15:50:09
+最后更新：2026-07-24 15:16:17
 
 ## 项目简介
 TrafficIngestor 用于批量采集网页访问流量与页面内容。宿主机脚本负责管理 Docker 容器池、分发任务；容器内脚本负责驱动浏览器或 Scrapy 执行访问，并输出抓包文件、TLS 密钥日志、HTML、截图和文本内容。
@@ -73,7 +73,7 @@ id,url,domain
 
 ### 2. 修改配置并直接运行
 
-HTTPS 任务必须显式传入配置文件路径。修改 `trafficIngestor/single_csv/base.py` 中的 `CONFIG`、`RUNTIME_NAME` 或 `ACTION_PROFILE` 后执行：
+HTTPS 任务必须显式传入配置文件路径。修改 `trafficIngestor/single_csv/base.py` 中的 `CONFIG` 或 `ACTION_PROFILE` 后执行：
 
 ```powershell
 python trafficIngestor/host_scheduler/single_csv_profiles.py trafficIngestor/single_csv/base.py
@@ -94,7 +94,7 @@ python trafficIngestor/host_scheduler_clash/single_csv_profiles.py trafficIngest
 - `python trafficIngestor/host_scheduler/single_csv_profiles.py trafficIngestor/single_csv/fixed_ip_rsia.py`
   Chrome 批量流量采集，容器挂到独立网络 `traffic_ingestor_fixed_ip_rsia_net`，IP 从 `172.18.2.2` 开始递增
 - `python trafficIngestor/host_scheduler_clash/single_csv_profiles.py trafficIngestor/single_csv/clash.py`
-  Chrome + Clash 批量流量采集，运行时按配置中的 `RUNTIME_NAME` 创建独立 Docker 网络，并从 `172.19.0.0/16` 地址池中选择可用 `/22` 子网
+  Chrome + Clash 批量流量采集，运行时按配置文件名生成运行名称并创建独立 Docker 网络，从 `172.19.0.0/16` 地址池中选择可用 `/22` 子网
 - `python trafficIngestor/host_scheduler_clash/single_csv_profiles.py trafficIngestor/single_csv/fixed_ip_europe_clash.py`
   Chrome + Clash 欧洲入口，使用 `configs/clash/sever_info.py` 中的 `vpns_info_europ` 节点数组；网络隔离逻辑与普通 Clash 入口一致
 - `python trafficIngestor/host_scheduler/single_csv_profiles.py trafficIngestor/single_csv/edge.py`
@@ -127,7 +127,7 @@ python trafficIngestor/host_scheduler_clash/single_csv_profiles.py trafficIngest
 - `trafficIngestor/host_scheduler/single_csv_profiles.py`：HTTPS 指定配置文件的运行入口
 - `trafficIngestor/host_scheduler_clash/single_csv_profiles.py`：Clash 指定配置文件的运行入口
 
-公共配置加载、任务源和运行策略位于 `trafficIngestor/host_scheduler/csv_ingestor_common.py`。配置文件只需定义 `CONFIG`、`RUNTIME_NAME` 和 `ACTION_PROFILE`，运行时必须显式传入该 `.py` 文件的路径。HTTPS 入口最多执行 5 轮，每轮间隔 1200 秒并在没有待处理任务时停止；Clash 入口执行 5 轮，每轮间隔 3600 秒。每个配置显式保存运行命名空间，动态工作目录统一写入 `runtime/workspaces/`。
+公共配置加载、任务源和运行策略位于 `trafficIngestor/host_scheduler/csv_ingestor_common.py`。配置文件只需定义 `CONFIG` 和 `ACTION_PROFILE`，运行时必须显式传入该 `.py` 文件的路径。`RUNTIME_NAME` 默认按 `traffic_capture_single_csv_<配置文件名>` 生成，也可在配置中显式覆盖。HTTPS 入口最多执行 5 轮，每轮间隔 1200 秒并在没有待处理任务时停止；Clash 入口执行 5 轮，每轮间隔 3600 秒。动态工作目录统一写入 `runtime/workspaces/`。
 
 `RETRY = 5`、`RESULT_DOMAIN_ROOT_DIR = "data"`、`TASK_CSV_DATA_ROOT_LAYOUT = True` 和 `SUCCESS_DELETE_GUARD_FIELD = "url"` 已固定在 `BaseTrafficIngestor`，单 CSV 配置文件无需重复声明。
 
@@ -149,7 +149,7 @@ Chrome、Edge、Firefox 及其 Clash/ECH 变体统一使用 `trafficIngestor/tra
 
 固定 IP 入口默认使用各自独立的 Docker 网络；若目标网络不存在，基类会按 `CONTAINER_IP_START`、`DOCKER_NETWORK_SUBNET_PREFIX` 和 `DOCKER_NETWORK_GATEWAY` 自动创建。当前示例入口分别使用 `traffic_ingestor_fixed_ip_europe_net`(`172.18.0.0/23`) 和 `traffic_ingestor_fixed_ip_rsia_net`(`172.18.2.0/23`)。网段规划约定为：Docker 默认网络保留 `172.17.0.0/16`；需要手动固定 IP 的采集器统一使用 `172.18.0.0/16`；这样可以在不触碰默认 bridge 的前提下，为特殊任务提供稳定容器地址，并减少多个大容器池复用同一 bridge 时触发 `exchange full`。
 
-Clash 入口根据配置文件中的 `RUNTIME_NAME` 启用运行命名空间隔离，并据此生成 `BASE_NAME`、`HOST_CODE_PATH`、`CONTAINER_PREFIX` 和 `DOCKER_NETWORK`。基类不会创建整个 `172.19.0.0/16`，而是把它当作地址池，按顺序扫描可用的 `/22` 子网并依次使用 `172.19.0.0/22`、`172.19.4.0/22`、`172.19.8.0/22`……；新建的自动子网默认使用 `.1` 作为网关、`.2` 作为首个容器 IP。建议在宿主机代理或 `v2raya` 配置中将 `172.19.0.0/16` 整段设为直连。若需要显式覆盖命名空间，可设置环境变量 `TRAFFIC_INGESTOR_RUN_NAME`。
+Clash 入口根据运行名称启用命名空间隔离，并据此生成 `BASE_NAME`、`HOST_CODE_PATH`、`CONTAINER_PREFIX` 和 `DOCKER_NETWORK`。运行名称默认是 `traffic_capture_single_csv_<配置文件名>`，可通过配置中的 `RUNTIME_NAME` 或环境变量 `TRAFFIC_INGESTOR_RUN_NAME` 显式覆盖。基类不会创建整个 `172.19.0.0/16`，而是把它当作地址池，按顺序扫描可用的 `/22` 子网并依次使用 `172.19.0.0/22`、`172.19.4.0/22`、`172.19.8.0/22`……；新建的自动子网默认使用 `.1` 作为网关、`.2` 作为首个容器 IP。建议在宿主机代理或 `v2raya` 配置中将 `172.19.0.0/16` 整段设为直连。
 
 ### Docker 网络排查
 需要核对宿主机上的 Docker 网段时，可先执行：

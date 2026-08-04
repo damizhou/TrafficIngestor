@@ -21,6 +21,7 @@ if _project_root not in sys.path:
 
 from tools.browsers.chrome import (
     add_cookies,
+    get_main_document_response,
     open_url_and_save_content,
     screenshot_full_page,
 )
@@ -473,6 +474,7 @@ __all__ = [
     "create_edge_driver",
     "get_edge_background_capture_exclude_hosts",
     "kill_edge_processes",
+    "get_main_document_response",
     "open_url_and_save_content",
     "screenshot_full_page",
     "add_cookies",

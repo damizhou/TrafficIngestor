@@ -618,6 +618,23 @@ def get_driver_performance_log_summary(driver, requested_url="", max_events=5):
     )
 
 
+def get_main_document_response(driver, requested_url="", current_url=""):
+    """Return the final main-document response from Chromium performance logs."""
+    perf_entries = driver.get_log("performance")
+    responses, _, _ = _parse_performance_entries(perf_entries)
+    document_responses = [item for item in responses if item.get("type") == "Document"]
+    if not document_responses:
+        return {}
+
+    for target_url in (current_url, requested_url):
+        if not target_url:
+            continue
+        matched = [item for item in document_responses if item.get("url") == target_url]
+        if matched:
+            return matched[-1]
+    return document_responses[-1]
+
+
 def build_browser_error_diagnostics(driver, requested_url, netlog_path="/tmp/netlog.json", max_events=3):
     """构建导航失败时的浏览器诊断信息。"""
     details = [f"requested_url={requested_url}"]

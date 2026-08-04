@@ -15,5 +15,4 @@ CONFIG = {
         "github_repose_1000.csv",
     ),
 }
-RUNTIME_NAME = "traffic_capture_single_csv_base"
 ACTION_PROFILE = "tools/browsers/chrome.py"

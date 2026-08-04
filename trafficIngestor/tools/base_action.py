@@ -29,6 +29,51 @@ from tools.logger import setup_logging
 from tools.pcap_validation import validate_pcap_structure
 
 
+HUMAN_VERIFICATION_TITLE_MARKERS = (
+    "just a moment",
+    "attention required",
+    "security check",
+    "verify you are human",
+    "checking your browser",
+    "captcha",
+    "人机验证",
+    "安全验证",
+    "访问验证",
+    "验证码",
+    "请稍候",
+)
+HUMAN_VERIFICATION_TEXT_MARKERS = (
+    "verify you are human",
+    "verifying you are human",
+    "confirm you are human",
+    "verify that you are not a robot",
+    "checking your browser before accessing",
+    "complete the security check",
+    "enable javascript and cookies to continue",
+    "unusual traffic from your computer network",
+    "are you a robot",
+    "press and hold to confirm you are a human",
+    "请完成安全验证",
+    "请完成验证",
+    "正在验证您是否是真人",
+    "验证您是否是真人",
+    "请验证您是人类",
+    "正在执行安全验证",
+    "拖动滑块完成验证",
+    "请输入验证码",
+    "请确认您不是机器人",
+    "当前访问疑似异常",
+)
+HUMAN_VERIFICATION_HTML_MARKERS = (
+    "cf-chl-",
+    "/challenge-platform/",
+    "g-recaptcha",
+    "h-captcha",
+    "data-sitekey",
+    "challenges.cloudflare.com/turnstile",
+)
+
+
 class TaskScopedLogger:
     """Buffer info/debug task logs until the task outcome is known."""
 
@@ -108,6 +153,7 @@ class BaseAction(ABC):
         self.container_name = ""
         self.logger = None  # 延迟初始化，等获取到容器名称后再设置
         self._last_pcap_validation_error = ""
+        self._last_page_validation = {}
         self._start_reaper()
 
     def _start_reaper(self):
@@ -197,6 +243,105 @@ class BaseAction(ABC):
         return False
 
     @staticmethod
+    def _read_page_text(path, limit=2_000_000):
+        if not path:
+            return ""
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as file:
+                return file.read(limit)
+        except OSError:
+            return ""
+
+    @staticmethod
+    def detect_human_verification(title, body_text, html):
+        """Conservatively identify a page-level bot challenge."""
+        normalized_title = " ".join(str(title or "").lower().split())
+        normalized_body = " ".join(str(body_text or "").lower().split())
+        normalized_html = str(html or "").lower()
+        signals = []
+        score = 0
+
+        title_marker = next(
+            (marker for marker in HUMAN_VERIFICATION_TITLE_MARKERS if marker in normalized_title),
+            "",
+        )
+        if title_marker:
+            signals.append(f"title:{title_marker}")
+            score += 3
+
+        text_marker = next(
+            (marker for marker in HUMAN_VERIFICATION_TEXT_MARKERS if marker in normalized_body),
+            "",
+        )
+        if text_marker:
+            signals.append(f"text:{text_marker}")
+            score += 3
+
+        html_marker = next(
+            (marker for marker in HUMAN_VERIFICATION_HTML_MARKERS if marker in normalized_html),
+            "",
+        )
+        if html_marker:
+            signals.append(f"html:{html_marker}")
+            score += 2
+
+        if normalized_body and len(normalized_body) <= 3000:
+            signals.append(f"short_body:{len(normalized_body)}")
+            score += 1
+
+        return score >= 3, signals
+
+    def inspect_loaded_page(self, browser, requested_url, current_url, content_path, html_path):
+        """Collect final-navigation status and page-level challenge signals."""
+        navigation = {}
+        try:
+            navigation = browser.execute_script(
+                """
+                const entries = performance.getEntriesByType('navigation');
+                const nav = entries.length ? entries[entries.length - 1] : null;
+                return {
+                    responseStatus: nav && Number.isFinite(nav.responseStatus) ? nav.responseStatus : 0,
+                    name: nav && nav.name ? nav.name : window.location.href,
+                    title: document.title || '',
+                    bodyText: document.body ? (document.body.innerText || '').slice(0, 200000) : ''
+                };
+                """
+            ) or {}
+        except Exception as exc:
+            self.logger.warning(f"页面状态检查失败: {type(exc).__name__}: {exc}")
+
+        try:
+            http_status = int(navigation.get("responseStatus") or 0)
+        except (TypeError, ValueError):
+            http_status = 0
+        response_url = str(navigation.get("name") or current_url or requested_url or "")
+        title = str(navigation.get("title") or "")
+        body_text = str(navigation.get("bodyText") or "")
+        if not body_text:
+            body_text = self._read_page_text(content_path, limit=200_000)
+        html = self._read_page_text(html_path)
+        human_verification, verification_signals = self.detect_human_verification(
+            title,
+            body_text,
+            html,
+        )
+
+        failure_reason = ""
+        if http_status >= 400:
+            failure_reason = "http_error"
+        elif human_verification:
+            failure_reason = "human_verification"
+
+        return {
+            "failure_reason": failure_reason,
+            "http_status": http_status,
+            "response_url": response_url,
+            "title": title[:300],
+            "human_verification": human_verification,
+            "human_verification_signals": verification_signals,
+        }
+
+    @staticmethod
     def is_unhealthy_browser_error(error_text):
         """Return True when further WebDriver calls are likely to hang."""
         text = error_text or ""
@@ -280,6 +425,16 @@ class BaseAction(ABC):
             reasons.append(f"open_url_error={open_url_error[:300]}")
         if self._last_pcap_validation_error:
             reasons.append(f"pcap_invalid={self._last_pcap_validation_error[:300]}")
+        page_validation = self._last_page_validation
+        http_status = page_validation.get("http_status", 0)
+        if http_status:
+            reasons.append(f"http_status={http_status}")
+        response_url = str(page_validation.get("response_url", "") or "")
+        if response_url:
+            reasons.append(f"response_url={response_url[:300]}")
+        verification_signals = page_validation.get("human_verification_signals", [])
+        if page_validation.get("human_verification") and verification_signals:
+            reasons.append("human_verification=" + ",".join(verification_signals[:6]))
 
         pcap = path_diagnostics["pcap_path"]
         ssl_key = path_diagnostics["ssl_key_file_path"]
@@ -426,6 +581,7 @@ class BaseAction(ABC):
         screenshot_path = ""
         pcap_path = ""
         current_url = ""
+        page_validation = {}
         open_url_error = ""
         ssl_key_file_path = ""
         browser = None
@@ -459,6 +615,13 @@ class BaseAction(ABC):
             try:
                 content_path, html_path, screenshot_path, current_url = self.open_and_save_content(
                     browser, url, ssl_key_file_path
+                )
+                page_validation = self.inspect_loaded_page(
+                    browser,
+                    url,
+                    current_url,
+                    content_path,
+                    html_path,
                 )
                 skip_browser_quit = bool(getattr(browser, "_traffic_ingestor_skip_quit", False))
                 open_url_error = ""
@@ -505,6 +668,14 @@ class BaseAction(ABC):
 
         # 检查页面是否为404
         page_not_found = self.check_page_not_found(html_path, self.allowed_domain)
+        self._last_page_validation = page_validation
+        page_failure_reason = str(page_validation.get("failure_reason", "") or "")
+        http_status = int(page_validation.get("http_status", 0) or 0)
+        if http_status in (404, 410):
+            page_not_found = True
+        if page_not_found and not page_failure_reason:
+            page_failure_reason = "page_not_found"
+        page_rejected = bool(page_failure_reason)
 
         # 验证文件
         validation_passed = False
@@ -515,8 +686,14 @@ class BaseAction(ABC):
             html_path,
             screenshot_path,
         )
-        if page_not_found:
-            self.logger.warning("页面不存在")
+        if page_rejected:
+            if page_failure_reason == "http_error":
+                self.logger.warning(f"HTTP 主文档状态码校验失败: {http_status}")
+            elif page_failure_reason == "human_verification":
+                signals = page_validation.get("human_verification_signals", [])
+                self.logger.warning(f"检测到人机验证页面: {', '.join(signals)}")
+            else:
+                self.logger.warning("页面不存在")
         elif self.validate_files(pcap_path, ssl_key_file_path, content_path, html_path) and path_diagnostics["screenshot_path"]["exists"]:
             self.logger.info("数据文件校验通过")
             validation_passed = True
@@ -541,10 +718,11 @@ class BaseAction(ABC):
                 "screenshot_path": screenshot_path or "",
                 "current_url": current_url or "",
                 "success": True,
+                "page_validation": page_validation,
             }
         else:
             failure_details = self.build_failure_details(open_url_error, page_not_found, path_diagnostics)
-            failure_reason = "page_not_found" if page_not_found else "file_validation_failed"
+            failure_reason = page_failure_reason or "file_validation_failed"
             result = {
                 "pcap_path": "",
                 "ssl_key_file_path": "",
@@ -567,9 +745,12 @@ class BaseAction(ABC):
                 "open_url_error": open_url_error[:1000] if open_url_error else "",
                 "log_path": self.get_current_log_path(container),
                 "requested_url": url,
+                "page_validation": page_validation,
             }
-            if page_not_found:
-                self.logger.warning(f"页面不存在，任务失败: row_id={row_id}")
+            if page_rejected:
+                self.logger.warning(
+                    f"页面校验失败，任务失败: row_id={row_id}, reason={failure_reason}"
+                )
             else:
                 reason_text = f" | {', '.join(failure_details)}" if failure_details else ""
                 self.logger.warning(f"文件校验失败，任务失败: row_id={row_id}{reason_text}")

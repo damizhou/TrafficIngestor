@@ -14,5 +14,4 @@ CONFIG = {
         "top300000_ingestor.csv",
     ),
 }
-RUNTIME_NAME = "traffic_capture_single_csv_top200000"
 ACTION_PROFILE = "tools/browsers/chrome.py"

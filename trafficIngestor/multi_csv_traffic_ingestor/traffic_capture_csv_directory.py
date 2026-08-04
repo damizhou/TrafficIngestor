@@ -89,6 +89,7 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
         self._site_summary_path = ""
         self._sites = self._load_sites(csv_paths)
         super().__init__()
+        self._execution_task_sequence = 0
 
     def _load_sites(self, csv_paths: List[Path]) -> List[CsvSiteState]:
         sites: List[CsvSiteState] = []
@@ -103,6 +104,10 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
                 prepared_jobs.append(prepared)
             sites.append(CsvSiteState(csv_path=csv_path, jobs=prepared_jobs))
         return sites
+
+    def _site_target_successes(self, site: CsvSiteState) -> int:
+        """每个 CSV 最多采集上限条，记录不足时以现有记录数为目标。"""
+        return min(len(site.jobs), self.target_successes)
 
     def copy_task_csv_to_base_dst(self) -> Optional[str]:
         """按 CSV 域名数量将源文件复制到 data，并在 logs 中生成来源清单。"""
@@ -157,7 +162,7 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
                         "domain_count": len(domains),
                         "domains": ",".join(domains),
                         "url_count": len(site.jobs),
-                        "target_successes": self.target_successes,
+                        "target_successes": self._site_target_successes(site),
                     }
                 )
                 self.chown_path(str(copied_path))
@@ -183,20 +188,11 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
             self.CSV_PATH = original_csv_path
 
         if log_path:
-            self._write_execution_task_log(
-                "multi_csv_config",
-                source_csv_files=self._source_csv_paths,
-                target_successes_per_csv=self.target_successes,
-                failed_url_retry_rounds=self.retry_rounds,
-                csv_count=len(self._sites),
-                sources=[
-                    {
-                        "csv": site.csv_path.name,
-                        "path": str(site.csv_path.resolve()),
-                        "url_count": len(site.jobs),
-                    }
-                    for site in self._sites
-                ],
+            self.log(
+                f"多 CSV 配置: CSV数={len(self._sites)}，"
+                f"每站目标成功数={self.target_successes}，"
+                f"失败重试轮数={self.retry_rounds}，"
+                f"来源清单={self._source_manifest_path}"
             )
         return log_path
 
@@ -206,7 +202,7 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
             if self._initial_jobs:
                 return []
             planned_task_count = sum(
-                min(len(site.jobs), self.target_successes) for site in self._sites
+                self._site_target_successes(site) for site in self._sites
             )
             self.scheduler_capacity = self.resolve_container_count(planned_task_count)
             self.CONTAINER_COUNT = self.scheduler_capacity
@@ -241,7 +237,11 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
         while capacity > 0:
             scheduled = False
             for site in self._sites:
-                needed = self.target_successes - site.success_count - site.inflight_count
+                needed = (
+                    self._site_target_successes(site)
+                    - site.success_count
+                    - site.inflight_count
+                )
                 while needed > 0 and capacity > 0:
                     task = self._next_site_job_locked(site)
                     if task is None:
@@ -278,7 +278,7 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
             site.inflight_count -= 1
             site.success_count += 1
             self._successful_jobs.append(dict(task))
-            if site.success_count >= self.target_successes and site.retry_jobs:
+            if site.success_count >= self._site_target_successes(site) and site.retry_jobs:
                 site.discarded_retry_count += len(site.retry_jobs)
                 site.retry_jobs.clear()
             self._fill_available_slots_locked()
@@ -311,15 +311,16 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
     def _build_progress_text(self) -> str:
         with self._scheduler_lock:
             total_success = sum(site.success_count for site in self._sites)
-            total_target = len(self._sites) * self.target_successes
+            total_target = sum(self._site_target_successes(site) for site in self._sites)
             total_inflight = sum(site.inflight_count for site in self._sites)
             reached_sites = sum(
-                site.success_count >= self.target_successes for site in self._sites
+                site.success_count >= self._site_target_successes(site)
+                for site in self._sites
             )
             active_sites = [
                 site
                 for site in self._sites
-                if site.success_count < self.target_successes
+                if site.success_count < self._site_target_successes(site)
                 and (
                     site.inflight_count > 0
                     or site.next_job_index < len(site.jobs)
@@ -327,7 +328,7 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
                 )
             ]
             site_parts = [
-                f"{site.csv_path.stem}:{site.success_count}/{self.target_successes}"
+                f"{site.csv_path.stem}:{site.success_count}/{self._site_target_successes(site)}"
                 f"(在途{site.inflight_count},未请求{len(site.jobs) - site.next_job_index},"
                 f"待重试{len(site.retry_jobs)})"
                 for site in active_sites[:3]
@@ -352,28 +353,6 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
             and total_done % PROGRESS_LOG_EVERY_COMPLETIONS == 0
         ):
             self.log(progress_text)
-            self._write_execution_task_log(
-                "multi_csv_progress",
-                completed_attempts=total_done,
-                successful_attempts=self._global_ok,
-                failed_attempts=self._global_fail,
-                sites=self._site_progress_records(),
-            )
-
-    def _site_progress_records(self) -> List[Dict[str, Any]]:
-        with self._scheduler_lock:
-            return [
-                {
-                    "csv": site.csv_path.name,
-                    "success": site.success_count,
-                    "target": self.target_successes,
-                    "inflight": site.inflight_count,
-                    "unrequested": len(site.jobs) - site.next_job_index,
-                    "retry_pending": len(site.retry_jobs),
-                    "retry_discarded_after_target": site.discarded_retry_count,
-                }
-                for site in self._sites
-            ]
 
     def run_once(
         self,
@@ -412,10 +391,11 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
 
     def _log_site_summary(self) -> None:
         for site in self._sites:
-            status = "达标" if site.success_count >= self.target_successes else "URL及重试已耗尽"
+            target = self._site_target_successes(site)
+            status = "达标" if site.success_count >= target else "URL及重试已耗尽"
             self.log(
                 f"CSV汇总: {site.csv_path.name} | {status} | "
-                f"成功={site.success_count}/{self.target_successes} | URL总数={len(site.jobs)}"
+                f"成功={site.success_count}/{target} | URL总数={len(site.jobs)}"
             )
 
     def _write_success_manifest(self) -> Optional[str]:
@@ -478,18 +458,19 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
             )
             writer.writeheader()
             for site in self._sites:
+                target = self._site_target_successes(site)
                 writer.writerow(
                     {
                         "source_csv": site.csv_path.name,
                         "url_count": len(site.jobs),
                         "success_count": site.success_count,
-                        "target_successes": self.target_successes,
+                        "target_successes": target,
                         "unrequested_count": len(site.jobs) - site.next_job_index,
                         "retry_pending_count": len(site.retry_jobs),
                         "retry_discarded_after_target_count": site.discarded_retry_count,
                         "status": (
                             "target_reached"
-                            if site.success_count >= self.target_successes
+                            if site.success_count >= target
                             else "exhausted_before_target"
                         ),
                     }
@@ -509,12 +490,6 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
         report = super().verify_task_completeness(manifest_path)
         self.log(f"成功任务清单: {manifest_path}")
         self.log(f"每站结果汇总: {summary_path}")
-        self._write_execution_task_log(
-            "multi_csv_result_files",
-            success_manifest=manifest_path,
-            site_summary=summary_path,
-            source_csv_files=self._source_csv_paths,
-        )
         return report
 
     def should_continue(self) -> bool:
@@ -522,7 +497,8 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
 
     def get_cleanup_wait_seconds(self) -> float:
         if self._sites and all(
-            site.success_count >= self.target_successes for site in self._sites
+            site.success_count >= self._site_target_successes(site)
+            for site in self._sites
         ):
             return 0.0
         return super().get_cleanup_wait_seconds()

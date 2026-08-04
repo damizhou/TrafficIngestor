@@ -17,5 +17,4 @@ CONFIG = {
         "wiki_edge.csv",
     ),
 }
-RUNTIME_NAME = "traffic_capture_single_csv_edge_clash"
 ACTION_PROFILE = "tools/browsers/edge.py"

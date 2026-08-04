@@ -16,5 +16,4 @@ CONFIG = {
         "github_repose_1000_trojan.csv",
     ),
 }
-RUNTIME_NAME = "github_traffic_trojan"
 ACTION_PROFILE = "tools/browsers/chrome.py"

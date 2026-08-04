@@ -15,5 +15,4 @@ CONFIG = {
         "homeonly_merged_10_clash.csv",
     ),
 }
-RUNTIME_NAME = "traffic_capture_single_csv_clash"
 ACTION_PROFILE = "tools/browsers/chrome.py"

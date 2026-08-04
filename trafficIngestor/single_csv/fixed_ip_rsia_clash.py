@@ -17,5 +17,4 @@ CONFIG = {
         "homeonly_merged_chrome_sgp.csv",
     ),
 }
-RUNTIME_NAME = "traffic_capture_single_csv_fixed_ip_rsia_clash"
 ACTION_PROFILE = "tools/browsers/chrome.py"

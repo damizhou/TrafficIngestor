@@ -15,5 +15,4 @@ CONFIG = {
         "urls_tls12_top100.csv",
     ),
 }
-RUNTIME_NAME = "traffic_capture_single_csv_bsky"
 ACTION_PROFILE = "tools/browsers/chrome.py"

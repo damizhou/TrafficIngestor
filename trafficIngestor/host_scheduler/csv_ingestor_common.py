@@ -106,7 +106,11 @@ def load_profile_definition(
             f"配置文件 {source_path} 的 DELETE_CSV_RECORD_ON_SUCCESS 必须是布尔值"
         )
 
-    runtime_name = _required_module_value(module, "RUNTIME_NAME", source_path)
+    runtime_name = getattr(
+        module,
+        "RUNTIME_NAME",
+        f"traffic_capture_single_csv_{source_path.stem}",
+    )
     if not isinstance(runtime_name, str) or not runtime_name.strip():
         raise TypeError(f"配置文件 {source_path} 的 RUNTIME_NAME 必须是非空字符串")
 

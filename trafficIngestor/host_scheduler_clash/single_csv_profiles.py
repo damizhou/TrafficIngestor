@@ -8,7 +8,7 @@
 示例：
     python trafficIngestor/host_scheduler_clash/single_csv_profiles.py trafficIngestor/single_csv/github_trojan.py
 
-配置文件必须定义 CONFIG、RUNTIME_NAME 和 ACTION_PROFILE。
+配置文件必须定义 CONFIG 和 ACTION_PROFILE；RUNTIME_NAME 可选。
 """
 
 from __future__ import annotations

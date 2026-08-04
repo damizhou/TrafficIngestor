@@ -143,6 +143,45 @@ class ConfiguredCaptureAction(BaseAction):
                 self.log_clash_runtime_diagnostics()
             raise
 
+    def inspect_loaded_page(self, browser, requested_url, current_url, content_path, html_path):
+        validation = super().inspect_loaded_page(
+            browser,
+            requested_url,
+            current_url,
+            content_path,
+            html_path,
+        )
+        if validation.get("http_status"):
+            return validation
+
+        backend = self.get_backend_module()
+        response_reader = getattr(backend, "get_main_document_response", None)
+        if response_reader is None:
+            self.logger.warning(
+                f"{self.browser_name} 未能获取 HTTP 主文档状态码，仅执行页面内容校验"
+            )
+            return validation
+
+        try:
+            response = response_reader(
+                browser,
+                requested_url=requested_url,
+                current_url=current_url,
+            )
+            status = int(response.get("status") or 0)
+        except Exception as exc:
+            self.logger.warning(f"HTTP 主文档状态码日志检查失败: {type(exc).__name__}: {exc}")
+            return validation
+
+        if not status:
+            self.logger.warning("HTTP 性能日志中未找到最终主文档状态码")
+            return validation
+        validation["http_status"] = status
+        validation["response_url"] = str(response.get("url") or current_url or requested_url)
+        if status >= 400:
+            validation["failure_reason"] = "http_error"
+        return validation
+
     def get_capture_exclude_hosts(self):
         backend = self.get_backend_module()
         if BACKEND_KIND == "edge":
