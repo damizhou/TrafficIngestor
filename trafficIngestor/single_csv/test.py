@@ -7,12 +7,12 @@ from single_csv._common import PROJECT_ROOT
 
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
-    "BASE_DST": "/netdisk2/ww/github/20260813",
+    "BASE_DST": "/netdisk/pcz/test",
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",
         "result",
-        "github_10.csv",
+        "test.csv",
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"

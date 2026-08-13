@@ -267,7 +267,7 @@ class BaseAction(ABC):
         )
         if title_marker:
             signals.append(f"title:{title_marker}")
-            score += 3
+            score += 1
 
         text_marker = next(
             (marker for marker in HUMAN_VERIFICATION_TEXT_MARKERS if marker in normalized_body),
@@ -283,7 +283,7 @@ class BaseAction(ABC):
         )
         if html_marker:
             signals.append(f"html:{html_marker}")
-            score += 2
+            score += 3
 
         if normalized_body and len(normalized_body) <= 3000:
             signals.append(f"short_body:{len(normalized_body)}")
