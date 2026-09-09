@@ -87,7 +87,7 @@ class BaseTrafficIngestor(ABC):
     MAX_DYNAMIC_CONTAINER_COUNT: int = 600
     DYNAMIC_CONTAINER_TASKS_PER_CONTAINER: int = 10
     DYNAMIC_ONE_CONTAINER_PER_TASK_LIMIT: int = 50
-    DOCKER_IMAGE: str = "chuanzhoupan/trace_spider_chrome:151_260811"
+    DOCKER_IMAGE = "chuanzhoupan/trace_spider_chrome:151_260909"
     BROWSER_NAME: str = "chrome"
     BROWSER_VERSION_COMMANDS: Tuple[Tuple[str, ...], ...] = (
         ("google-chrome", "--version"),
@@ -109,6 +109,8 @@ class BaseTrafficIngestor(ABC):
     DOCKER_NETWORK_SUBNET_PREFIX: int = 24
     DOCKER_NETWORK_GATEWAY: Optional[str] = None
     DOCKER_NETWORK_ATTACHMENT_WARN_THRESHOLD: Optional[int] = 900
+    MOUNT_CODE_IN_CONTAINERS: bool = True
+    DISABLE_OFFLOAD_DURING_POOL_PREPARE: bool = True
     DEFAULT_UID: int = get_default_uid()
     DEFAULT_GID: int = get_default_gid()
     CLEAR_HOST_CODE_SUBDIRS_AFTER_BATCH: bool = False
@@ -836,20 +838,23 @@ class BaseTrafficIngestor(ABC):
         image: str,
         container_ip: Optional[str] = None
     ) -> None:
-        """创建容器，同时挂载代码目录和 tools 目录"""
-        uid, gid = str(os.getuid()), str(os.getgid())
-        tools_path = os.path.join(self.SOURCE_ROOT, 'tools')
+        """创建容器；按配置决定是否挂载代码目录和 tools 目录。"""
         self.log(f"creating container: {name}")
         cmd = [
             "docker", "run",
             "--init",
             "--dns", "172.17.0.1",  # 使用宿主机 dnsmasq 作为 DNS 缓存
-            "--volume", f"{host_code_path}:{self.CONTAINER_CODE_PATH}",
-            "--volume", f"{tools_path}:{self.CONTAINER_CODE_PATH}/tools",
-            "-e", f"HOST_UID={uid}",
-            "-e", f"HOST_GID={gid}",
-            "--privileged",
         ]
+        if self.MOUNT_CODE_IN_CONTAINERS:
+            uid, gid = str(os.getuid()), str(os.getgid())
+            tools_path = os.path.join(self.SOURCE_ROOT, 'tools')
+            cmd += [
+                "--volume", f"{host_code_path}:{self.CONTAINER_CODE_PATH}",
+                "--volume", f"{tools_path}:{self.CONTAINER_CODE_PATH}/tools",
+                "-e", f"HOST_UID={uid}",
+                "-e", f"HOST_GID={gid}",
+            ]
+        cmd += ["--privileged"]
         dns_args = self.get_docker_dns_args()
         if dns_args:
             cmd[3:5] = dns_args
@@ -1123,15 +1128,18 @@ class BaseTrafficIngestor(ABC):
         """准备容器池，返回容器名列表"""
         self.ensure_docker_available()
 
-        host_code = self.ensure_host_code_path_ready()
-        if not host_code.exists():
-            self.log(f"WARN: 宿主机代码目录不存在：{host_code}，仍会尝试挂载。")
-        if not host_code.is_absolute():
-            self.log(f"WARN: 建议使用绝对路径挂载，当前={host_code}")
+        host_code = None
+        if self.MOUNT_CODE_IN_CONTAINERS:
+            host_code = self.ensure_host_code_path_ready()
+            if not host_code.exists():
+                self.log(f"WARN: 宿主机代码目录不存在：{host_code}，仍会尝试挂载。")
+            if not host_code.is_absolute():
+                self.log(f"WARN: 建议使用绝对路径挂载，当前={host_code}")
 
         names = self.build_container_names()
         self.ensure_target_network_ready()
-        self.disable_target_bridge_offload()
+        if self.DISABLE_OFFLOAD_DURING_POOL_PREPARE:
+            self.disable_target_bridge_offload()
         self.log_target_network_usage(planned_new=len(names))
         self.log("checking and creating containers...")
         self.log(f"容器池规模={len(names)}: {names[0]} … {names[-1]}")
@@ -1146,7 +1154,12 @@ class BaseTrafficIngestor(ABC):
             _, name, expected_ip = spec
             exists = self.container_exists(name)
             if exists is None:
-                self.create_container(name, str(host_code), self.DOCKER_IMAGE, container_ip=expected_ip)
+                self.create_container(
+                    name,
+                    str(host_code) if host_code is not None else "",
+                    self.DOCKER_IMAGE,
+                    container_ip=expected_ip,
+                )
                 with created_lock:
                     created.append(name)
                 return
@@ -1158,7 +1171,12 @@ class BaseTrafficIngestor(ABC):
                         f"期望 IP={expected_ip}，将重建容器"
                     )
                     self.remove_container(name)
-                    self.create_container(name, str(host_code), self.DOCKER_IMAGE, container_ip=expected_ip)
+                    self.create_container(
+                        name,
+                        str(host_code) if host_code is not None else "",
+                        self.DOCKER_IMAGE,
+                        container_ip=expected_ip,
+                    )
                     with created_lock:
                         created.append(name)
 
@@ -1173,10 +1191,11 @@ class BaseTrafficIngestor(ABC):
 
         time.sleep(5)
 
-        # Pass 3：对容器内 eth0 和宿主机 veth peer 关闭 offload
-        for n in names:
-            self.disable_offload_once(n)
-            self.disable_host_veth_offload_once(n)
+        # Pass 3：按配置对容器内 eth0 和宿主机 veth peer 关闭 offload
+        if self.DISABLE_OFFLOAD_DURING_POOL_PREPARE:
+            for n in names:
+                self.disable_offload_once(n)
+                self.disable_host_veth_offload_once(n)
 
         self._browser_label = self.detect_browser_label(names[0])
         return names
@@ -1531,7 +1550,7 @@ if errors:
         required_artifacts = {
             "pcap": ".pcap",
             "ssl_key": "_ssl_key.log",
-            "content": ".text",
+            "content": ".txt",
             "html": ".html",
             "screenshot": ".png",
         }

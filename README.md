@@ -1,6 +1,6 @@
 # TrafficIngestor
 
-最后更新：2026-07-24 15:16:17
+最后更新：2026-08-17 16:35:51
 
 ## 项目简介
 TrafficIngestor 用于批量采集网页访问流量与页面内容。宿主机脚本负责管理 Docker 容器池、分发任务；容器内脚本负责驱动浏览器或 Scrapy 执行访问，并输出抓包文件、TLS 密钥日志、HTML、截图和文本内容。
@@ -111,7 +111,7 @@ python trafficIngestor/host_scheduler_clash/single_csv_profiles.py trafficIngest
 
 - `data/YYYYMMDD/*.pcap`
 - `ssl_key/YYYYMMDD/*_ssl_key.log`
-- `content/YYYYMMDD/*.text`
+- `content/YYYYMMDD/*.txt`
 - `html/YYYYMMDD/*.html`
 - `screenshot/YYYYMMDD/*.png`
 - `meta/{container}_last.json`

@@ -7,12 +7,14 @@ from single_csv._common import PROJECT_ROOT
 
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
-    "BASE_DST": "/netdisk2/ww/github/20260904",
+    "DOCKER_IMAGE": "chuanzhoupan/trace_spider:250912",
+    "CONTAINER_COUNT": 150,
+    "BASE_DST": "/netdisk/cl/20260817/us/chrome",
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",
         "result",
-        "github_5.csv",
+        "cl_url_us_chrome.csv",
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"

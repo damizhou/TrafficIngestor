@@ -889,7 +889,7 @@ def open_url_and_save_content(driver, url, ssl_key_file_path, wait_secs=8,
         raise RuntimeError(f"JS失败: {res}")
 
     plain = re.sub(r'(?:[ \t\f\u00A0\u3000\u200B\u200C\u200D\uFEFF\u2060\u00AD\v]*\r?\n)+', '\n', res.get("plain", ""))
-    content_path = ssl_key_file_path.replace("_ssl_key.log", ".text").replace("/ssl_key/", "/content/")
+    content_path = ssl_key_file_path.replace("_ssl_key.log", ".txt").replace("/ssl_key/", "/content/")
     html_path = ssl_key_file_path.replace("_ssl_key.log", ".html").replace("/ssl_key/", "/html/")
 
     os.makedirs(os.path.dirname(content_path), exist_ok=True)

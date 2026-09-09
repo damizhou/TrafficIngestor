@@ -38,7 +38,7 @@ DEFAULT_BASE_DIRS = [
 DEFAULT_LIMIT = 120
 SIDE_ARTIFACT_SUFFIXES = {
     "ssl_key": "_ssl_key.log",
-    "content": ".text",
+    "content": ".txt",
     "html": ".html",
     "screenshot": ".png",
 }
