@@ -35,8 +35,8 @@ from host_scheduler import single_csv_profiles as profile_runner
 from host_scheduler.csv_ingestor_common import CsvIngestorProfile
 
 
-PROFILE_PATH = PROJECT_ROOT / "trafficIngestor" / "single_csv" / "wiki_black_5.py"
-CONTAINER_COUNT = 15
+PROFILE_PATH = PROJECT_ROOT / "trafficIngestor" / "single_csv" / "test.py"
+CONTAINER_COUNT = 1
 MOUNT_CODE_IN_CONTAINERS = False
 DISABLE_OFFLOAD_DURING_POOL_PREPARE = False
 DOCKER_COMMAND_TIMEOUT = 60

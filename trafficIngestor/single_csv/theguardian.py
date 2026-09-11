@@ -7,13 +7,13 @@ from single_csv._common import PROJECT_ROOT
 
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
-    "BASE_DST": "/netdisk2/ww/theguardian/sensitive/20260911",
+    "BASE_DST": "/netdisk2/ww/theguardian/2025/20260911",
     "CONTAINER_COUNT": 450,
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",
         "result",
-        "theguardian_sensitive5_urls.csv",
+        "theguardian2025_all_reformat.csv"
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"

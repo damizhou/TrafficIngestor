@@ -87,7 +87,7 @@ class BaseTrafficIngestor(ABC):
     MAX_DYNAMIC_CONTAINER_COUNT: int = 600
     DYNAMIC_CONTAINER_TASKS_PER_CONTAINER: int = 10
     DYNAMIC_ONE_CONTAINER_PER_TASK_LIMIT: int = 50
-    DOCKER_IMAGE = "chuanzhoupan/trace_spider_chrome:151_260909"
+    DOCKER_IMAGE = "chuanzhoupan/trace_spider_chrome:153_260909"
     BROWSER_NAME: str = "chrome"
     BROWSER_VERSION_COMMANDS: Tuple[Tuple[str, ...], ...] = (
         ("google-chrome", "--version"),

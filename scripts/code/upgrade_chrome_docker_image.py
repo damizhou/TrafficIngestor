@@ -35,9 +35,10 @@ DEFAULT_TARGET_NAMESPACE = "chuanzhoupan"
 TARGET_REPOSITORY_NAME = "trace_spider_chrome"
 NAMESPACE_PATTERN = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 TAG_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
+SOURCE_IMAGE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]*$")
 FULL_VERSION_PATTERN = re.compile(r"\d+(?:\.\d+){3}")
 
-DOCKERFILE = r"""ARG SOURCE_IMAGE
+DOCKERFILE = r"""ARG SOURCE_IMAGE=__SOURCE_IMAGE__
 FROM ${SOURCE_IMAGE}
 
 USER root
@@ -51,14 +52,14 @@ RUN set -eux; \
         'Acquire::http::Timeout "60";' \
         'Acquire::https::Timeout "60";' \
         > /etc/apt/apt.conf.d/80-traffic-ingestor-retries; \
-    apt-get update; \
+    apt-get -o Acquire::Check-Valid-Until=false update; \
     apt-get install -y --no-upgrade --no-install-recommends ca-certificates curl gnupg unzip; \
     install -d -m 0755 /etc/apt/keyrings; \
     curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
         | gpg --dearmor --yes -o /etc/apt/keyrings/google-chrome.gpg; \
     echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
         > /etc/apt/sources.list.d/google-chrome.list; \
-    apt-get update; \
+    apt-get -o Acquire::Check-Valid-Until=false update; \
     apt-cache policy google-chrome-stable; \
     apt-get install -y --no-install-recommends google-chrome-stable; \
     chrome_version="$(google-chrome --version | grep -Eo '[0-9]+(\.[0-9]+){3}')"; \
@@ -148,6 +149,12 @@ def read_component_version(image: str, executable: str) -> tuple[str, str]:
     return match.group(0), output
 
 
+def render_dockerfile(source_image: str) -> str:
+    if SOURCE_IMAGE_PATTERN.fullmatch(source_image) is None:
+        raise ValueError(f"基础镜像格式无效：{source_image}")
+    return DOCKERFILE.replace("__SOURCE_IMAGE__", source_image, 1)
+
+
 def get_major_version(version: str) -> int:
     return int(version.split(".", maxsplit=1)[0])
 
@@ -190,7 +197,9 @@ def main() -> int:
     try:
         with tempfile.TemporaryDirectory(prefix="chrome-image-build-") as build_context:
             dockerfile_path = Path(build_context, "Dockerfile")
-            dockerfile_path.write_text(DOCKERFILE, encoding="utf-8", newline="\n")
+            dockerfile_path.write_text(
+                render_dockerfile(args.source_image), encoding="utf-8", newline="\n"
+            )
 
             print(f"拉取基础镜像：{args.source_image}")
             run(["docker", "pull", args.source_image])
