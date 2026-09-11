@@ -74,6 +74,9 @@ MAX_SCREENSHOT_DEVICE_DIMENSION = 16384
 MAX_SCREENSHOT_DEVICE_PIXELS = 60_000_000
 FULL_PAGE_SCREENSHOT_TIMEOUT_SECS = 300
 VIEWPORT_SCREENSHOT_TIMEOUT_SECS = 120
+CHROME_VIEWPORT_WIDTH = 3840
+CHROME_VIEWPORT_HEIGHT = 2160
+CHROME_DEVICE_SCALE_FACTOR = 1.0
 
 
 def _host_matches_domain(host, domain):
@@ -202,7 +205,14 @@ class ChromeDriverFactory:
         return ()
 
     def configure_created_driver(self, browser, task_name, context):
-        pass
+        """在首次导航前设置固定的4K桌面虚拟视口。"""
+        browser.execute_cdp_cmd("Emulation.setDeviceMetricsOverride", {
+            "mobile": False,
+            "width": CHROME_VIEWPORT_WIDTH,
+            "height": CHROME_VIEWPORT_HEIGHT,
+            "deviceScaleFactor": CHROME_DEVICE_SCALE_FACTOR,
+            "screenOrientation": {"type": "landscapePrimary", "angle": 0},
+        })
 
     def create_driver(self, task_name=None, formatted_time=None, parsers=None,
                       enable_ssl_key_log=True, data_base_dir=None,
@@ -394,8 +404,11 @@ def _create_chrome_driver(factory, task_name=None, formatted_time=None, parsers=
     if resolved_chrome_binary_path:
         chrome_options.binary_location = resolved_chrome_binary_path
 
-    chrome_options.add_argument('--headless')  # 无界面模式
+    chrome_options.add_argument('--headless=new')  # 无界面模式
     chrome_options.add_argument(f"--user-data-dir={chrome_profile_dir}")
+    chrome_options.add_argument(
+        f"--window-size={CHROME_VIEWPORT_WIDTH},{CHROME_VIEWPORT_HEIGHT}"
+    )
     chrome_options.add_argument("--disable-gpu")  # 禁用 GPU 加速
     chrome_options.add_argument(f"--disable-features={_DISABLED_CHROME_FEATURES}")  # 降低后台服务联网
     if factory.disable_async_dns(context):
@@ -480,13 +493,19 @@ def _create_chrome_driver(factory, task_name=None, formatted_time=None, parsers=
     else:
         service = Service()
 
+    browser = None
     try:
         browser = webdriver.Chrome(service=service, options=chrome_options)
+        factory.configure_created_driver(browser, task_name, context)
     except Exception:
+        if browser is not None:
+            try:
+                browser.quit()
+            except Exception:
+                pass
         _remove_chrome_profile_dir(chrome_profile_dir)
         raise
     _attach_profile_cleanup(browser, chrome_profile_dir)
-    factory.configure_created_driver(browser, task_name, context)
     browser.execute_cdp_cmd('Network.enable', {})
     if normalized_blocked_hosts:
         try:
@@ -826,7 +845,12 @@ def _save_screenshot_with_fallback(driver, screenshot_path, logger, prefer_full_
             _call_with_worker_timeout(
                 FULL_PAGE_SCREENSHOT_TIMEOUT_SECS,
                 f"整页截图超过{FULL_PAGE_SCREENSHOT_TIMEOUT_SECS}秒",
-                lambda: screenshot_full_page(driver, Path(full_page_tmp_path), dpr=2.0, logger=logger),
+                lambda: screenshot_full_page(
+                    driver,
+                    Path(full_page_tmp_path),
+                    dpr=CHROME_DEVICE_SCALE_FACTOR,
+                    logger=logger,
+                ),
             )
             if os.path.exists(full_page_tmp_path) and os.path.getsize(full_page_tmp_path) > 0:
                 os.replace(full_page_tmp_path, screenshot_path)
