@@ -17,9 +17,9 @@ from pathlib import Path
 
 # Hardcoded config
 INPUT_CSV = "../origin/tranco_ZWZ5G.csv"
-START_LINE = 330001
-END_LINE = 530001
-OUTPUT_CSV = "../result/top200000_ingestor_subpage.csv"
+START_LINE = 1
+END_LINE = 15000
+OUTPUT_CSV = "../result/top15000_yjn.csv"
 DEFAULT_SCHEME = "https://"
 
 SCRIPT_DIR = Path(__file__).resolve().parent

@@ -83,6 +83,7 @@ class BaseTrafficIngestor(ABC):
     BASE_DST: str = ""
 
     # ============== 可选配置（有默认值）==============
+    # 动态容器数上限；未配置时使用 MAX_DYNAMIC_CONTAINER_COUNT。
     CONTAINER_COUNT: Optional[int] = None
     MAX_DYNAMIC_CONTAINER_COUNT: int = 600
     DYNAMIC_CONTAINER_TASKS_PER_CONTAINER: int = 10
@@ -152,6 +153,7 @@ class BaseTrafficIngestor(ABC):
         self._global_fail = 0
         self._global_total_jobs = 0
         self._global_container_count = 1
+        self._resolved_container_count: Optional[int] = None
 
     @staticmethod
     def estimate_remaining_eta_seconds(remaining: int, per_min: float) -> float:
@@ -1055,20 +1057,25 @@ class BaseTrafficIngestor(ABC):
         return [f"{self.CONTAINER_PREFIX}{i}" for i in range(self.get_container_count())]
 
     def get_container_count(self) -> int:
-        """Return the resolved positive container count."""
+        """Return the resolved container count, or its configured upper bound."""
+        resolved = getattr(self, "_resolved_container_count", None)
+        if resolved is not None:
+            return max(int(resolved), 1)
+
         configured = getattr(self, "CONTAINER_COUNT", None)
         if configured is None:
             return 1
         return max(int(configured), 1)
 
     def resolve_container_count(self, task_count: int) -> int:
-        """Resolve explicit or task-count-based container count before pool creation."""
+        """Resolve a task-count-based container count bounded by its configured maximum."""
         configured = getattr(self, "CONTAINER_COUNT", None)
-        if configured is not None:
-            return max(int(configured), 1)
-
         tasks_per_container = max(int(self.DYNAMIC_CONTAINER_TASKS_PER_CONTAINER), 1)
-        max_count = max(int(self.MAX_DYNAMIC_CONTAINER_COUNT), 1)
+        max_count = (
+            max(int(configured), 1)
+            if configured is not None
+            else max(int(self.MAX_DYNAMIC_CONTAINER_COUNT), 1)
+        )
         task_count = max(int(task_count), 0)
         one_per_task_limit = max(int(self.DYNAMIC_ONE_CONTAINER_PER_TASK_LIMIT), 0)
         base_count = min(task_count, one_per_task_limit)
@@ -1078,19 +1085,21 @@ class BaseTrafficIngestor(ABC):
         return min(dynamic_count, max_count)
 
     def configure_container_count_for_jobs(self, jobs: List[Dict[str, str]]) -> int:
-        """Set CONTAINER_COUNT once the first task batch is known."""
-        was_dynamic = getattr(self, "CONTAINER_COUNT", None) is None
+        """Resolve and retain the actual pool size after the first task batch is known."""
+        configured = getattr(self, "CONTAINER_COUNT", None)
         count = self.resolve_container_count(len(jobs))
-        self.CONTAINER_COUNT = count
-        if was_dynamic:
-            self.log(
-                f"动态容器数={count}（任务数={len(jobs)}，"
-                f"前 {self.DYNAMIC_ONE_CONTAINER_PER_TASK_LIMIT} 个任务按一任务一容器，"
-                f"之后每 {self.DYNAMIC_CONTAINER_TASKS_PER_CONTAINER} 个任务增加一个容器，"
-                f"上限={self.MAX_DYNAMIC_CONTAINER_COUNT}）"
-            )
-        else:
-            self.log(f"容器数={count}（显式配置）")
+        self._resolved_container_count = count
+        max_count = (
+            max(int(configured), 1)
+            if configured is not None
+            else max(int(self.MAX_DYNAMIC_CONTAINER_COUNT), 1)
+        )
+        self.log(
+            f"动态容器数={count}（任务数={len(jobs)}，"
+            f"前 {self.DYNAMIC_ONE_CONTAINER_PER_TASK_LIMIT} 个任务按一任务一容器，"
+            f"之后每 {self.DYNAMIC_CONTAINER_TASKS_PER_CONTAINER} 个任务增加一个容器，"
+            f"上限={max_count}）"
+        )
         return count
 
     def get_default_action_source(self) -> Path:

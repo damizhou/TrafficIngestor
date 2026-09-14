@@ -416,7 +416,8 @@ def _create_chrome_driver(factory, task_name=None, formatted_time=None, parsers=
     chrome_options.add_argument("--disable-background-mode")
     chrome_options.add_argument("--no-sandbox")  # 禁用沙盒
     chrome_options.add_argument("--disable-dev-shm-usage")  # 限制使用/dev/shm
-    chrome_options.add_argument("--incognito")  # 隐身模式
+    chrome_options.add_argument("--mute-audio")
+    chrome_options.add_argument("--disable-notifications")
     chrome_options.add_argument("--disable-application-cache")  # 禁用应用缓存
     chrome_options.add_argument("--disable-breakpad")
     chrome_options.add_argument("--disable-client-side-phishing-detection")

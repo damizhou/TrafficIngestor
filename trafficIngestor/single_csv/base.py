@@ -8,7 +8,7 @@ from single_csv._common import PROJECT_ROOT
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
     "BASE_DST": "/netdisk2/ww/theguardian/sensitive/20260911",
-    "CONTAINER_COUNT": 450,
+    "CONTAINER_COUNT": 100,
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",

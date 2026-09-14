@@ -656,16 +656,6 @@ class BaseAction(ABC):
                 open_url_error = repr(e).replace("\n", " ")
                 self.logger.error(f"SSL keylog 最终复制异常: {e}")
 
-        if traffic_thread is not None:
-            self.logger.info(f"等待TCP结束挥手完成，耗时60秒")
-            time.sleep(60)
-
-            # 关流量收集
-            self.logger.info(f"关流量收集")
-            pcap_path = stop_capture()
-        else:
-            self.logger.info("抓包未启动，跳过停止抓包")
-
         # 检查页面是否为404
         page_not_found = self.check_page_not_found(html_path, self.allowed_domain)
         self._last_page_validation = page_validation
@@ -676,6 +666,19 @@ class BaseAction(ABC):
         if page_not_found and not page_failure_reason:
             page_failure_reason = "page_not_found"
         page_rejected = bool(page_failure_reason)
+
+        if traffic_thread is not None:
+            if page_rejected or open_url_error:
+                self.logger.info("页面采集未成功，跳过等待TCP结束挥手完成")
+            else:
+                self.logger.info("等待TCP结束挥手完成，耗时60秒")
+                time.sleep(60)
+
+            # 关流量收集
+            self.logger.info("关流量收集")
+            pcap_path = stop_capture()
+        else:
+            self.logger.info("抓包未启动，跳过停止抓包")
 
         # 验证文件
         validation_passed = False

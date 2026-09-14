@@ -8,13 +8,13 @@ from single_csv._common import PROJECT_ROOT
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
     "DOCKER_IMAGE": "chuanzhoupan/trace_spider:250912",
-    "CONTAINER_COUNT": 150,
-    "BASE_DST": "/netdisk/cl/20260817/us/chrome",
+    "CONTAINER_COUNT": 900,
+    "BASE_DST": "/netdisk/yjn/20260914/us/chrome",
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",
         "result",
-        "cl_url_us_chrome.csv",
+        "top15000_50_yjn.csv",
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"

@@ -205,7 +205,6 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
                 self._site_target_successes(site) for site in self._sites
             )
             self.scheduler_capacity = self.resolve_container_count(planned_task_count)
-            self.CONTAINER_COUNT = self.scheduler_capacity
             self._fill_available_slots_locked()
             return list(self._initial_jobs)
 

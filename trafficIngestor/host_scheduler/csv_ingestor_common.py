@@ -4,8 +4,12 @@
 
 from __future__ import annotations
 
+import csv
 import importlib.util
+import os
+import stat
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -145,20 +149,60 @@ class CsvTaskSourceMixin:
     """复用单 CSV 任务读取、成功删行和单轮退出逻辑。"""
 
     CSV_PATH: str
+    CSV_SUCCESS_FLUSH_SIZE = 1000
+    _CSV_ROW_INDEX_FIELD = "_csv_row_index"
     _has_jobs: bool
 
     def __init__(self) -> None:
         super().__init__()
         self._has_jobs = True
+        self._csv_loaded = False
+        self._csv_header_fields: list[str] = []
+        self._csv_rows: list[Dict[str, str]] = []
+        self._csv_completed_indices: set[int] = set()
+        self._csv_successes_since_flush = 0
 
     def fetch_jobs(self) -> list[Dict[str, str]]:
         if not self._has_jobs:
             return []
 
-        jobs, _ = self.read_jobs_from_csv(self.CSV_PATH)
-        if not jobs:
+        if not self._csv_loaded:
+            csv_path = Path(self.CSV_PATH)
+            if not csv_path.exists():
+                self._csv_loaded = True
+                self._has_jobs = False
+                return []
+            self._csv_header_fields, self._csv_rows = self._read_csv_records(
+                csv_path
+            )
+            self._csv_loaded = True
+
+        if not self._csv_header_fields:
             self._has_jobs = False
+            return []
+
+        jobs: list[Dict[str, str]] = []
+        for row_index, row in enumerate(self._csv_rows):
+            url = self._get_csv_row_value(row, "url")
+            if not url:
+                continue
+            row.setdefault("row_id", self._get_csv_row_value(row, "id"))
+            row.setdefault("url", url)
+            row.setdefault("domain", self._get_csv_row_value(row, "domain"))
+            row[self._CSV_ROW_INDEX_FIELD] = row_index
+            jobs.append(row)
+
+        # 单个实例只发放一次全量内存任务，避免重复入队。
+        self._has_jobs = False
         return jobs
+
+    @staticmethod
+    def _get_csv_row_value(row: Dict[str, str], key: str) -> str:
+        expected_key = key.strip().lower()
+        for actual_key, actual_value in row.items():
+            if isinstance(actual_key, str) and actual_key.lower() == expected_key:
+                return (actual_value or "").strip()
+        return ""
 
     def on_task_success(
         self,
@@ -174,16 +218,109 @@ class CsvTaskSourceMixin:
             return
 
         try:
-            self.remove_first_matching_row_from_csv(
-                self.CSV_PATH,
-                {
-                    "id": task.get("row_id", ""),
-                    "url": task.get("url", ""),
-                    "domain": task.get("domain", ""),
-                },
-            )
+            should_flush = False
+            with self._csv_lock:
+                row_index = task.get(self._CSV_ROW_INDEX_FIELD)
+                if not isinstance(row_index, int):
+                    row_index = self._find_csv_row_index(task)
+                if row_index is None or row_index in self._csv_completed_indices:
+                    return
+
+                self._csv_completed_indices.add(row_index)
+                self._csv_successes_since_flush += 1
+                should_flush = (
+                    self._csv_successes_since_flush >= self.CSV_SUCCESS_FLUSH_SIZE
+                )
+
+            if should_flush:
+                self._flush_csv_successes()
         except Exception as exc:
-            self.log(f"ERROR: 删除 CSV 记录失败: {exc}")
+            self.log(f"ERROR: 批量更新 CSV 失败: {exc}")
+
+    def _find_csv_row_index(self, task: Dict[str, str]) -> int | None:
+        expected_fields = {
+            "id": (task.get("row_id", "") or "").strip(),
+            "url": (task.get("url", "") or "").strip(),
+            "domain": (task.get("domain", "") or "").strip(),
+        }
+        for row_index, row in enumerate(self._csv_rows):
+            if row_index in self._csv_completed_indices:
+                continue
+            if all(
+                self._get_csv_row_value(row, key) == value
+                for key, value in expected_fields.items()
+            ):
+                return row_index
+        return None
+
+    def _flush_csv_successes(self, force: bool = False) -> None:
+        if not self.DELETE_CSV_RECORD_ON_SUCCESS:
+            return
+
+        with self._csv_lock:
+            pending_count = self._csv_successes_since_flush
+            if not self._csv_loaded or pending_count <= 0:
+                return
+            if not force and pending_count < self.CSV_SUCCESS_FLUSH_SIZE:
+                return
+
+            csv_path = Path(self.CSV_PATH)
+            if not csv_path.exists():
+                raise FileNotFoundError(f"CSV 不存在，无法写回成功记录: {csv_path}")
+
+            original_stat = csv_path.stat()
+            remaining_rows = [
+                row
+                for row_index, row in enumerate(self._csv_rows)
+                if row_index not in self._csv_completed_indices
+            ]
+
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                dir=csv_path.parent,
+                suffix=".tmp",
+                prefix=f".{csv_path.name}.",
+            )
+            try:
+                with os.fdopen(
+                    tmp_fd,
+                    "w",
+                    encoding="utf-8-sig",
+                    newline="",
+                ) as csv_file:
+                    writer = csv.DictWriter(
+                        csv_file,
+                        fieldnames=self._csv_header_fields,
+                        extrasaction="ignore",
+                    )
+                    writer.writeheader()
+                    writer.writerows(remaining_rows)
+                    csv_file.flush()
+                    os.fsync(csv_file.fileno())
+
+                os.chmod(tmp_path, stat.S_IMODE(original_stat.st_mode))
+                if hasattr(os, "chown"):
+                    os.chown(tmp_path, original_stat.st_uid, original_stat.st_gid)
+                os.replace(tmp_path, csv_path)
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+
+            self._csv_successes_since_flush = 0
+            self.log(
+                f"已批量更新 CSV：本批完成 {pending_count} 条，"
+                f"累计成功 {len(self._csv_completed_indices)} 条，"
+                f"剩余 {len(remaining_rows)} 条"
+                f"{self.build_success_csv_remove_log_suffix()}"
+            )
+
+    def cleanup(self) -> None:
+        try:
+            self._flush_csv_successes(force=True)
+        finally:
+            super().cleanup()
 
     def should_continue(self) -> bool:
         return False

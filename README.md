@@ -1,6 +1,6 @@
 # TrafficIngestor
 
-最后更新：2026-08-17 16:35:51
+最后更新：2026-09-12 21:45:33
 
 ## 项目简介
 TrafficIngestor 用于批量采集网页访问流量与页面内容。宿主机脚本负责管理 Docker 容器池、分发任务；容器内脚本负责驱动浏览器或 Scrapy 执行访问，并输出抓包文件、TLS 密钥日志、HTML、截图和文本内容。
@@ -137,7 +137,7 @@ Chrome、Edge、Firefox 及其 Clash/ECH 变体统一使用 `trafficIngestor/tra
 
 - `CSV_PATH`：输入任务 CSV
 - `BASE_DST`：最终输出目录
-- `CONTAINER_COUNT`：容器并发数
+- `CONTAINER_COUNT`：动态容器数上限；实际启动数量按任务数计算（前 50 个任务一任务一容器，之后每 10 个任务增加一个容器），不会超过该值
 - `DOCKER_IMAGE`：容器镜像；默认值在 `BaseTrafficIngestor` 中统一维护，只有 Edge / Firefox 等非默认镜像入口需要覆盖
 - `RETRY`：失败重试次数，当前由基类固定为 5
 - `DELETE_CSV_RECORD_ON_SUCCESS`：任务成功后是否删除输入 CSV 中的对应记录；`True` 删除，`False` 保留

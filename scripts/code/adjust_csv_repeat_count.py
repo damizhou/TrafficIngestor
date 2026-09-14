@@ -33,15 +33,15 @@ SMALL_TOOLS_DIR = SCRIPT_DIR.parent
 
 # ===== 全局配置 =====
 # 要调整重复次数的 CSV 路径。
-CSV_PATH = SMALL_TOOLS_DIR / "result/theguardian_sensitive1_urls.csv"
+CSV_PATH = SMALL_TOOLS_DIR / "result/top15000_yjn.csv"
 
 # 输出 CSV 路径。设为 None 表示原地覆盖 CSV_PATH。
-OUTPUT_CSV: Optional[Path] = SMALL_TOOLS_DIR / "result/theguardian_sensitive5_urls.csv"
+OUTPUT_CSV: Optional[Path] = SMALL_TOOLS_DIR / "result/top15000_50_yjn.csv"
 
 # 第一轮不重复记录要扩充输出的轮数。
 # 例如原文件只有 1 轮唯一记录，设置为 10 后会输出 10 轮。
 # 如果原文件已有 40 轮，设置为 10 后会用第一轮记录重建为 10 轮。
-TARGET_REPEAT_COUNT = 5
+TARGET_REPEAT_COUNT = 50
 
 # True 表示第一行是表头，表头会固定保留一次，不参与重复次数统计。
 HAS_HEADER = True
