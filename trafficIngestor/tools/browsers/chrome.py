@@ -150,16 +150,9 @@ class ChromeDriverFactory:
     DISABLED_FEATURES = (
         "AsyncDns",
         "AutofillServerCommunication",
-        "CertificateTransparencyComponentUpdater",
-        "DialMediaRouteProvider",
-        "InterestFeedContentSuggestions",
-        "LocalDiscovery",
         "MediaRouter",
         "OptimizationHints",
-        "PrintCompositorService",
-        "Translate",
     )
-    NETLOG_PATH = "/tmp/netlog.json"
 
     def build_managed_policy(self):
         return {
@@ -192,14 +185,8 @@ class ChromeDriverFactory:
     def get_disabled_features(self, context):
         return self.DISABLED_FEATURES
 
-    def disable_async_dns(self, context):
-        return True
-
     def get_startup_arguments(self, context):
         return ()
-
-    def get_netlog_path(self, context):
-        return self.NETLOG_PATH
 
     def get_feature_arguments(self, context):
         return ()
@@ -278,9 +265,16 @@ def _install_chrome_managed_policy(policy, logger=None):
         _log_driver_warning(logger, f"写入 Chrome 后台联网禁用 policy 失败: {e}")
 
 
-def _create_chrome_profile_dir(local_state, logger=None):
+def _create_chrome_task_tmp_dir():
+    return tempfile.mkdtemp(prefix="trafficIngestor-ingestor-chrome-task-")
+
+
+def _create_chrome_profile_dir(local_state, logger=None, task_tmp_dir=None):
     """为每次采集创建干净 profile，避免复用状态触发账号/同步/推送后台服务。"""
-    profile_dir = tempfile.mkdtemp(prefix="trafficIngestor-ingestor-chrome-profile-")
+    profile_dir = tempfile.mkdtemp(
+        prefix="trafficIngestor-ingestor-chrome-profile-",
+        dir=task_tmp_dir,
+    )
     try:
         Path(profile_dir, "Local State").write_text(
             json.dumps(local_state, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -291,21 +285,60 @@ def _create_chrome_profile_dir(local_state, logger=None):
     return profile_dir
 
 
-def _remove_chrome_profile_dir(profile_dir):
-    if profile_dir:
-        shutil.rmtree(profile_dir, ignore_errors=True)
+def _remove_chrome_task_tmp_dir(task_tmp_dir):
+    if task_tmp_dir:
+        shutil.rmtree(task_tmp_dir, ignore_errors=True)
 
 
-def _attach_profile_cleanup(browser, profile_dir):
+def _set_chrome_task_tmp_env(task_tmp_dir):
+    previous_env = {
+        name: os.environ.get(name)
+        for name in ("TMPDIR", "TMP", "TEMP")
+    }
+    for name in previous_env:
+        os.environ[name] = task_tmp_dir
+    return previous_env
+
+
+def _restore_chrome_task_tmp_env(previous_env):
+    for name, value in previous_env.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+
+def _remove_chrome_crash_reports():
+    if not is_docker():
+        return
+    shutil.rmtree(
+        "/root/.config/google-chrome/Crash Reports",
+        ignore_errors=True,
+    )
+
+
+def _attach_chrome_cleanup(browser, task_tmp_dir, previous_env):
+    cleaned = False
+
+    def cleanup():
+        nonlocal cleaned
+        if cleaned:
+            return
+        cleaned = True
+        _restore_chrome_task_tmp_env(previous_env)
+        _remove_chrome_task_tmp_dir(task_tmp_dir)
+        _remove_chrome_crash_reports()
+
     original_quit = browser.quit
 
     def quit_and_cleanup():
         try:
             return original_quit()
         finally:
-            _remove_chrome_profile_dir(profile_dir)
+            cleanup()
 
     browser.quit = quit_and_cleanup
+    browser._traffic_ingestor_cleanup = cleanup
     return browser
 
 
@@ -381,7 +414,16 @@ def _create_chrome_driver(factory, task_name=None, formatted_time=None, parsers=
 
     os.environ["SE_OFFLINE"] = "true"
     _install_chrome_managed_policy(factory.build_managed_policy(), logger)
-    chrome_profile_dir = _create_chrome_profile_dir(factory.build_profile_local_state(), logger)
+    chrome_task_tmp_dir = _create_chrome_task_tmp_dir()
+    try:
+        chrome_profile_dir = _create_chrome_profile_dir(
+            factory.build_profile_local_state(),
+            logger,
+            task_tmp_dir=chrome_task_tmp_dir,
+        )
+    except Exception:
+        _remove_chrome_task_tmp_dir(chrome_task_tmp_dir)
+        raise
     if blocked_hosts is None:
         blocked_hosts = (
             get_chrome_background_blocked_hosts(task_name)
@@ -411,28 +453,20 @@ def _create_chrome_driver(factory, task_name=None, formatted_time=None, parsers=
     )
     chrome_options.add_argument("--disable-gpu")  # 禁用 GPU 加速
     chrome_options.add_argument(f"--disable-features={_DISABLED_CHROME_FEATURES}")  # 降低后台服务联网
-    if factory.disable_async_dns(context):
-        chrome_options.add_argument("--disable-async-dns")  # 备用参数
-    chrome_options.add_argument("--disable-background-mode")
     chrome_options.add_argument("--no-sandbox")  # 禁用沙盒
     chrome_options.add_argument("--disable-dev-shm-usage")  # 限制使用/dev/shm
     chrome_options.add_argument("--mute-audio")
     chrome_options.add_argument("--disable-notifications")
-    chrome_options.add_argument("--disable-application-cache")  # 禁用应用缓存
     chrome_options.add_argument("--disable-breakpad")
-    chrome_options.add_argument("--disable-client-side-phishing-detection")
     chrome_options.add_argument("--disable-component-extensions-with-background-pages")
     chrome_options.add_argument("--disable-component-update")
     chrome_options.add_argument("--disable-crash-reporter")
     chrome_options.add_argument("--disable-default-apps")
     chrome_options.add_argument("--disable-domain-reliability")
     chrome_options.add_argument("--disable-extensions")  # 禁用扩展
-    chrome_options.add_argument("--disable-infobars")  # 禁用信息栏
     chrome_options.add_argument("--disable-print-preview")
     chrome_options.add_argument("--disable-software-rasterizer")  # 禁用软件光栅化
     chrome_options.add_argument("--disable-sync")
-    chrome_options.add_argument("--dns-prefetch-disable")
-    chrome_options.add_argument("--safebrowsing-disable-auto-update")
     chrome_options.add_argument("--autoplay-policy=no-user-gesture-required")  # 允许自动播放
     chrome_options.add_argument(f"--lang={_LANG_PRIMARY}")  # 启动语言
     chrome_options.add_argument("--disable-background-networking")  # 降低背景"噪音"联网
@@ -443,8 +477,6 @@ def _create_chrome_driver(factory, task_name=None, formatted_time=None, parsers=
     chrome_options.add_argument("--no-default-browser-check")
     chrome_options.add_argument("--no-pings")
     chrome_options.add_argument("--homepage=about:blank")
-    chrome_options.add_argument(f"--log-net-log={factory.get_netlog_path(context)}")
-    chrome_options.add_argument("--net-log-capture-mode=Everything")
     for argument in factory.get_feature_arguments(context):
         chrome_options.add_argument(argument)
     if proxy_server:
@@ -494,6 +526,7 @@ def _create_chrome_driver(factory, task_name=None, formatted_time=None, parsers=
     else:
         service = Service()
 
+    previous_tmp_env = _set_chrome_task_tmp_env(chrome_task_tmp_dir)
     browser = None
     try:
         browser = webdriver.Chrome(service=service, options=chrome_options)
@@ -504,25 +537,34 @@ def _create_chrome_driver(factory, task_name=None, formatted_time=None, parsers=
                 browser.quit()
             except Exception:
                 pass
-        _remove_chrome_profile_dir(chrome_profile_dir)
+        _restore_chrome_task_tmp_env(previous_tmp_env)
+        _remove_chrome_task_tmp_dir(chrome_task_tmp_dir)
+        _remove_chrome_crash_reports()
         raise
-    _attach_profile_cleanup(browser, chrome_profile_dir)
-    browser.execute_cdp_cmd('Network.enable', {})
-    if normalized_blocked_hosts:
+    _attach_chrome_cleanup(browser, chrome_task_tmp_dir, previous_tmp_env)
+    try:
+        browser.execute_cdp_cmd('Network.enable', {})
+        if normalized_blocked_hosts:
+            try:
+                browser.execute_cdp_cmd(
+                    'Network.setBlockedURLs',
+                    {'urls': _build_blocked_url_patterns(normalized_blocked_hosts)}
+                )
+            except Exception as e:
+                _log_driver_warning(logger, f"设置 Chrome URL 拦截规则失败: {e}")
+        browser.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {'Accept-Language': _ACCEPT_LANGUAGE}})
+        browser.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument',
+                                {'source': '''
+                                Object.defineProperty(navigator,"webdriver",{get:()=>undefined});
+                                Object.defineProperty(navigator,"language",{get:()=> "zh-CN"});
+                                Object.defineProperty(navigator,"languages",{get:()=> ["zh-CN","zh"]});
+                                '''.strip()})
+    except Exception:
         try:
-            browser.execute_cdp_cmd(
-                'Network.setBlockedURLs',
-                {'urls': _build_blocked_url_patterns(normalized_blocked_hosts)}
-            )
-        except Exception as e:
-            _log_driver_warning(logger, f"设置 Chrome URL 拦截规则失败: {e}")
-    browser.execute_cdp_cmd('Network.setExtraHTTPHeaders', {'headers': {'Accept-Language': _ACCEPT_LANGUAGE}})
-    browser.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument',
-                            {'source': '''
-                            Object.defineProperty(navigator,"webdriver",{get:()=>undefined});
-                            Object.defineProperty(navigator,"language",{get:()=> "zh-CN"});
-                            Object.defineProperty(navigator,"languages",{get:()=> ["zh-CN","zh"]});
-                            '''.strip()})
+            browser.quit()
+        except Exception:
+            pass
+        raise
 
     if ssl_key_file_path:
         browser._traffic_ingestor_ssl_key_source_path = raw_ssl_key_file_path or ssl_key_file_path
@@ -655,7 +697,7 @@ def get_main_document_response(driver, requested_url="", current_url=""):
     return document_responses[-1]
 
 
-def build_browser_error_diagnostics(driver, requested_url, netlog_path="/tmp/netlog.json", max_events=3):
+def build_browser_error_diagnostics(driver, requested_url, max_events=3):
     """构建导航失败时的浏览器诊断信息。"""
     details = [f"requested_url={requested_url}"]
 
@@ -704,14 +746,6 @@ def build_browser_error_diagnostics(driver, requested_url, netlog_path="/tmp/net
             )
     elif perf_err:
         details.append(f"performance_log_error={perf_err}")
-
-    if netlog_path:
-        try:
-            if os.path.exists(netlog_path):
-                details.append(f"netlog_path={netlog_path}")
-                details.append(f"netlog_size={os.path.getsize(netlog_path)}")
-        except OSError as e:
-            details.append(f"netlog_stat_error={type(e).__name__}: {e}")
 
     return " | ".join(details)
 

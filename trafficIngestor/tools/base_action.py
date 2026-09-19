@@ -648,6 +648,12 @@ class BaseAction(ABC):
 
         self.logger.info("清理浏览器进程(兜底)")
         self.kill_browser_processes()
+        browser_cleanup = getattr(browser, "_traffic_ingestor_cleanup", None)
+        if callable(browser_cleanup):
+            try:
+                browser_cleanup()
+            except Exception as e:
+                self.logger.warning(f"清理浏览器任务临时目录异常: {e}")
 
         if browser is not None and ssl_key_file_path:
             try:

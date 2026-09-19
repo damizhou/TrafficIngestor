@@ -61,6 +61,10 @@ def get_default_gid() -> int:
     return int(getgid()) if getgid is not None else 1000
 
 
+class FatalIngestorError(RuntimeError):
+    """Stop scheduling immediately because continuing could corrupt shared state."""
+
+
 class BaseTrafficIngestor(ABC):
     """
     流量采集器基类
@@ -99,8 +103,16 @@ class BaseTrafficIngestor(ABC):
     ACTION_PROFILE: str = ""
     SYNC_DEFAULT_ACTION: bool = False
     CONTAINER_CODE_PATH: str = "/app"
+    CONTAINER_TMPFS_MOUNTS: Tuple[str, ...] = (
+        "/tmp:rw,size=512m,mode=1777,nr_inodes=65536",
+        (
+            "/root/.config/google-chrome/Crash Reports:"
+            "rw,size=64m,mode=0700,nr_inodes=4096"
+        ),
+    )
     CREATE_WITH_TTY: bool = True
     DOCKER_EXEC_TIMEOUT: int = 6000
+    HOST_CODE_CLEANUP_TIMEOUT: int = 600
     RETRY: int = 5
     FIRST_EXEC_INTERVAL: float = 1.0
     SAME_ID_EXEC_INTERVAL: float = 2.0
@@ -111,6 +123,7 @@ class BaseTrafficIngestor(ABC):
     DOCKER_NETWORK_GATEWAY: Optional[str] = None
     DOCKER_NETWORK_ATTACHMENT_WARN_THRESHOLD: Optional[int] = 900
     MOUNT_CODE_IN_CONTAINERS: bool = True
+    CLEAN_AND_RECREATE_CONTAINERS: bool = True
     DISABLE_OFFLOAD_DURING_POOL_PREPARE: bool = True
     DEFAULT_UID: int = get_default_uid()
     DEFAULT_GID: int = get_default_gid()
@@ -146,13 +159,16 @@ class BaseTrafficIngestor(ABC):
         self._execution_task_log_lock = threading.Lock()
         self._execution_task_log_path = ""
         self._pending_console_log_lines: List[str] = []
+        self._fatal_error_lock = threading.Lock()
+        self._fatal_error: Optional[BaseException] = None
+        self._stop_tasks_event = threading.Event()
 
         # 全局统计
         self._global_start_time = 0.0
         self._global_ok = 0
         self._global_fail = 0
         self._global_total_jobs = 0
-        self._global_container_count = 1
+        self._global_task_elapsed_total = 0.0
         self._resolved_container_count: Optional[int] = None
 
     @staticmethod
@@ -167,6 +183,13 @@ class BaseTrafficIngestor(ABC):
         total_minutes = max(int(round(seconds / 60.0)), 0)
         hours, minutes = divmod(total_minutes, 60)
         return f"{hours}小时{minutes}分钟"
+
+    def record_fatal_error(self, error: BaseException) -> None:
+        """Record the first fatal error and stop workers from taking new tasks."""
+        with self._fatal_error_lock:
+            if self._fatal_error is None:
+                self._fatal_error = error
+        self._stop_tasks_event.set()
 
     # ============== 日志 ==============
     def log(self, *args) -> None:
@@ -857,6 +880,8 @@ class BaseTrafficIngestor(ABC):
                 "-e", f"HOST_GID={gid}",
             ]
         cmd += ["--privileged"]
+        for tmpfs_mount in self.CONTAINER_TMPFS_MOUNTS:
+            cmd += ["--tmpfs", tmpfs_mount]
         dns_args = self.get_docker_dns_args()
         if dns_args:
             cmd[3:5] = dns_args
@@ -1209,76 +1234,56 @@ class BaseTrafficIngestor(ABC):
         self._browser_label = self.detect_browser_label(names[0])
         return names
 
+    def prepare_existing_container_pool(self) -> List[str]:
+        """Reuse the existing running container pool without creating or recreating it."""
+        self.ensure_docker_available()
+        if self.MOUNT_CODE_IN_CONTAINERS:
+            self.ensure_host_code_path_ready()
+
+        names = self.build_container_names()
+        cp = self.run_cmd(["docker", "ps", "--format", "{{.Names}}"], timeout=60)
+        if cp.returncode != 0:
+            detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
+            raise RuntimeError(f"无法列出现有容器: {detail}")
+
+        running = {line.strip() for line in (cp.stdout or "").splitlines() if line.strip()}
+        missing = [name for name in names if name not in running]
+        if missing:
+            preview = ", ".join(missing[:10])
+            suffix = "" if len(missing) <= 10 else f" ... (+{len(missing) - 10})"
+            raise RuntimeError(
+                "CLEAN_AND_RECREATE_CONTAINERS=False，但所需容器未运行: "
+                f"required={len(names)}, unavailable={len(missing)}, "
+                f"names={preview}{suffix}"
+            )
+
+        self._browser_label = self.detect_browser_label(names[0])
+        self.log(f"复用现有容器池：{len(names)} 个")
+        return names
+
     # ============== 文件操作 ==============
-    def normalize_host_code_cleanup_permissions(self, base_path: Path) -> bool:
-        """Return temporary HOST_CODE_PATH subdirs to the host user before deletion."""
-        script = r"""
-import os
-import sys
+    def remove_host_code_subdirs_via_container(self, names: List[str]) -> bool:
+        """Delete temporary HOST_CODE_PATH subdirs as root without traversing their files twice."""
+        if not names:
+            return True
 
-root = sys.argv[1]
-uid = int(sys.argv[2])
-gid = int(sys.argv[3])
-dir_mode = int(sys.argv[4], 8)
-file_mode = int(sys.argv[5], 8)
-skip_names = {"tools"}
-errors = []
-
-def apply(path, mode):
-    try:
-        os.lchown(path, uid, gid)
-    except OSError as exc:
-        errors.append(f"chown {path}: {exc}")
-    if os.path.islink(path):
-        return
-    try:
-        os.chmod(path, mode)
-    except OSError as exc:
-        errors.append(f"chmod {path}: {exc}")
-
-for name in os.listdir(root):
-    if name in skip_names:
-        continue
-    path = os.path.join(root, name)
-    if os.path.islink(path) or os.path.ismount(path) or not os.path.isdir(path):
-        continue
-    for current_root, dirs, files in os.walk(path, topdown=False, followlinks=False):
-        for file_name in files:
-            apply(os.path.join(current_root, file_name), file_mode)
-        for dir_name in dirs:
-            apply(os.path.join(current_root, dir_name), dir_mode)
-        apply(current_root, dir_mode)
-
-if errors:
-    print("; ".join(errors[:5]), file=sys.stderr)
-    if len(errors) > 5:
-        print(f"... {len(errors) - 5} more permission errors", file=sys.stderr)
-    sys.exit(1)
-"""
-
+        container_root = self.CONTAINER_CODE_PATH.rstrip("/") or "/"
+        targets = [posixpath.join(container_root, name) for name in names]
         errors: List[str] = []
         for container in self.build_container_names():
             if not self.container_running(container):
                 continue
             cp = self.run_cmd(
-                [
-                    "docker", "exec", "-u", "0:0", container,
-                    "python", "-c", script,
-                    self.CONTAINER_CODE_PATH.rstrip("/") or "/app",
-                    str(self.DEFAULT_UID),
-                    str(self.DEFAULT_GID),
-                    oct(self.SUCCESS_OUTPUT_DIR_MODE),
-                    oct(self.SUCCESS_OUTPUT_FILE_MODE),
-                ],
-                timeout=120,
+                ["docker", "exec", "-u", "0:0", container, "rm", "-rf", "--", *targets],
+                timeout=self.HOST_CODE_CLEANUP_TIMEOUT,
             )
             if cp.returncode == 0:
                 return True
             detail = (cp.stderr or cp.stdout).strip() or f"rc={cp.returncode}"
             errors.append(f"{container}: {detail}")
 
-        if errors:
-            self.log(f"WARN: HOST_CODE_PATH cleanup permission normalization failed: {errors[0]}")
+        detail = errors[0] if errors else "no running container available"
+        self.log(f"WARN: HOST_CODE_PATH container cleanup failed: {detail}")
         return False
 
     def get_host_code_cleanup_preserved_subdirs(self) -> set[str]:
@@ -1300,7 +1305,11 @@ if errors:
         if not entries:
             return
 
-        self.normalize_host_code_cleanup_permissions(base_path)
+        names = [entry.name for entry in entries]
+        self.log(f"HOST_CODE_PATH 清理开始：{len(names)} 个子目录")
+        if self.MOUNT_CODE_IN_CONTAINERS and self.remove_host_code_subdirs_via_container(names):
+            self.log(f"HOST_CODE_PATH 清理完成：{len(names)} 个子目录")
+            return
 
         for entry in entries:
             if entry.is_dir() and entry.name not in preserved:
@@ -1309,6 +1318,7 @@ if errors:
                     self.log(f"删除子目录: {entry}")
                 except Exception as e:
                     self.log(f"WARN: 删除子目录失败: {entry} -> {e}")
+        self.log(f"HOST_CODE_PATH 清理完成：{len(names)} 个子目录")
 
 
     def chown_path(self, path: str, uid: int = None, gid: int = None) -> None:
@@ -1993,11 +2003,15 @@ if errors:
             total_done = self._global_ok + self._global_fail
             elapsed = time.time() - self._global_start_time
             elapsed_min = elapsed / 60.0
+            self._global_task_elapsed_total += max(float(task_elapsed), 0.0)
 
             # 计算统计数据
             per_min = total_done / elapsed_min if elapsed_min > 0 else 0
-            # 平均耗时按并发容器折算：运行时长 * 容器总数 / 完成任务数
-            avg_time = (elapsed * self._global_container_count / total_done) if total_done > 0 else 0
+            avg_time = (
+                self._global_task_elapsed_total / total_done
+                if total_done > 0
+                else 0
+            )
             total_jobs = self._global_total_jobs or total_done
             remaining = max(total_jobs - total_done, 0)
             eta_seconds = self.estimate_remaining_eta_seconds(remaining, per_min)
@@ -2265,7 +2279,7 @@ if errors:
     def worker_loop(self, container: str, q: "queue.Queue[Dict[str, str]]",
                     stats: Dict[str, Any], retry: int) -> None:
         """Worker 循环，失败任务放回队列由其他容器重试"""
-        while True:
+        while not self._stop_tasks_event.is_set():
             try:
                 wait_timeout = max(float(self.WORKER_QUEUE_WAIT_TIMEOUT), 0.0)
                 if wait_timeout > 0:
@@ -2278,6 +2292,8 @@ if errors:
                 return
 
             try:
+                if self._stop_tasks_event.is_set():
+                    return
                 row_id = task.get("row_id", "")
                 url = task.get("url", "")
                 task["container"] = container
@@ -2305,6 +2321,10 @@ if errors:
                     else:
                         self._handle_final_failure(task, err, stats, task_start_time)
                     continue
+                except FatalIngestorError as e:
+                    self.record_fatal_error(e)
+                    self.log(f"FATAL: {container} -> {row_id} {e}")
+                    raise
                 except Exception as e:
                     err = repr(e)
                     self.log(f"{container} -> error [{row_id}] {err}")
@@ -2386,6 +2406,9 @@ if errors:
                     if future.done():
                         exc = future.exception()
                         if exc is not None:
+                            if isinstance(exc, FatalIngestorError):
+                                self.record_fatal_error(exc)
+                                raise exc
                             raise RuntimeError(
                                 f"worker {name} 异常退出，队列未完成任务数={unfinished}: {exc!r}"
                             ) from exc
@@ -2419,11 +2442,11 @@ if errors:
         # 准备容器池
         names: List[str] = []
 
-        self._global_container_count = max(len(names), 1)
         self._global_start_time = time.time()
         self._global_ok = 0
         self._global_fail = 0
         self._global_total_jobs = 0
+        self._global_task_elapsed_total = 0.0
         self._runtime_prepared = False
         batch_num = 0
 
@@ -2455,10 +2478,12 @@ if errors:
 
                 if not self._runtime_prepared:
                     self.configure_container_count_for_jobs(jobs)
-                    self.remove_containers()
-                    names = self.prepare_pool_once()
-                    self.clear_host_code_subdirs()
-                    self._global_container_count = max(len(names), 1)
+                    if self.CLEAN_AND_RECREATE_CONTAINERS:
+                        self.remove_containers()
+                        names = self.prepare_pool_once()
+                        self.clear_host_code_subdirs()
+                    else:
+                        names = self.prepare_existing_container_pool()
                     self._runtime_prepared = True
 
                 batch_num += 1
@@ -2483,6 +2508,10 @@ if errors:
                 if not self.should_continue():
                     break
 
+        except FatalIngestorError as e:
+            self.record_fatal_error(e)
+            self.log(f"FATAL: 事务一致性异常，停止调度: {e}")
+            raise
         except Exception as e:
             self.log(f"WARN: 执行异常：{e}")
         finally:
@@ -2490,12 +2519,18 @@ if errors:
             if self._pbar is not None:
                 self._pbar.close()
                 self._pbar = None
-            try:
-                self.verify_task_completeness()
-            except Exception as e:
-                self.log(f"WARN: 任务完整度校验失败：{e}")
-            if self._runtime_prepared or self.should_cleanup_when_idle():
-                self.cleanup()
+            if self._fatal_error is not None:
+                self.log("FATAL: 跳过完整度校验和 cleanup，保留 pending/journal 与容器现场")
+            else:
+                if self._runtime_prepared or batch_num > 0:
+                    try:
+                        self.verify_task_completeness()
+                    except Exception as e:
+                        self.log(f"WARN: 任务完整度校验失败：{e}")
+                else:
+                    self.log("运行时尚未完成初始化，跳过任务完整度校验")
+                if self._runtime_prepared or self.should_cleanup_when_idle():
+                    self.cleanup()
 
         # 最终汇总
         elapsed = time.time() - self._global_start_time
@@ -2504,7 +2539,11 @@ if errors:
         total_jobs = self._global_total_jobs or total_done
         remaining = max(total_jobs - total_done, 0)
         per_min = total_done / elapsed_min if elapsed_min > 0 else 0
-        avg_time = (elapsed * self._global_container_count / total_done) if total_done > 0 else 0
+        avg_time = (
+            self._global_task_elapsed_total / total_done
+            if total_done > 0
+            else 0
+        )
         eta_seconds = self.estimate_remaining_eta_seconds(remaining, per_min)
         eta_text = self.format_eta_hours_minutes(eta_seconds)
         self.log(f"[最终汇总] 批次={batch_num} | 运行时间={elapsed_min:.1f}分钟 | 总数={total_jobs} | "
@@ -2518,6 +2557,9 @@ if errors:
 
     def cleanup(self) -> None:
         """清理容器；成功完成全部任务时不额外等待。"""
+        if not self.CLEAN_AND_RECREATE_CONTAINERS:
+            self.log("CLEAN_AND_RECREATE_CONTAINERS=False，保留现有容器")
+            return
         wait_seconds = self.get_cleanup_wait_seconds()
         if wait_seconds > 0:
             self.log(f"等待任务现场稳定 {wait_seconds:g} 秒后清理容器")
@@ -2565,6 +2607,8 @@ if errors:
         ingestor = cls()
         try:
             return bool(ingestor.fetch_jobs())
+        except FatalIngestorError:
+            raise
         except Exception as e:
             ingestor.log(f"WARN: failed to check pending jobs after run: {e}")
             return True
