@@ -3,7 +3,7 @@
 """按单 CSV profile 创建临时 Docker 容器并查询公网出口 IPv4。
 
 用法：
-    python scripts/check_container_exit_ips.py
+    python scripts/code/check_container_exit_ips.py
 
 运行参数统一在本文件顶部的全局变量中修改。
 
@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = PROJECT_ROOT / "trafficIngestor"
 for import_root in (PROJECT_ROOT, SOURCE_ROOT):
     root_text = str(import_root)
@@ -35,8 +35,8 @@ from host_scheduler import single_csv_profiles as profile_runner
 from host_scheduler.csv_ingestor_common import CsvIngestorProfile
 
 
-PROFILE_PATH = PROJECT_ROOT / "trafficIngestor" / "single_csv" / "test.py"
-CONTAINER_COUNT = 1
+PROFILE_PATH = PROJECT_ROOT / "trafficIngestor" / "single_csv" / "geo_sgp_chrome.py"
+CONTAINER_COUNT = 2
 MOUNT_CODE_IN_CONTAINERS = False
 DISABLE_OFFLOAD_DURING_POOL_PREPARE = False
 DOCKER_COMMAND_TIMEOUT = 60

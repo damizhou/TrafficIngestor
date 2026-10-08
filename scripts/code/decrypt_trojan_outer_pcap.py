@@ -18,11 +18,10 @@ import json
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Iterable, Optional
 
-from trojan_unwrap import parse_trojan_request
+from scripts.code.trojan_unwrap import parse_trojan_request
 
 
 NODE_RE = re.compile(r"^Node\s+(\d+):\s+(.+)$")

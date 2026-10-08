@@ -8,17 +8,17 @@ from single_csv._common import PROJECT_ROOT
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
     "DOCKER_IMAGE": "chuanzhoupan/trace_spider:250912",
-    "CONTAINER_COUNT": 150,
-    "BASE_DST": "/netdisk/cl/20260820/lon/chrome",
+    "CONTAINER_COUNT": 100,
+    "BASE_DST": "/netdisk/cl/20260817/fra/chrome",
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",
         "result",
-        "cl_url_lon.csv",
+        "cl_url_fra_chrome.csv",
     ),
-    "DOCKER_NETWORK": "traffic_ingestor_fixed_ip_lon_net",
-    "DOCKER_NETWORK_SUBNET_PREFIX": 22,
-    "DOCKER_NETWORK_GATEWAY": "172.21.0.1",
-    "CONTAINER_IP_START": "172.21.0.2",
+    "DOCKER_NETWORK": "traffic_ingestor_geo_fra_net",
+    "DOCKER_NETWORK_SUBNET_PREFIX": 24,
+    "DOCKER_NETWORK_GATEWAY": "172.18.0.1",
+    "CONTAINER_IP_START": "172.18.0.2",
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"
