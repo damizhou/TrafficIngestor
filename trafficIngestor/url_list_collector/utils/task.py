@@ -19,6 +19,7 @@ class Task:
             self.requesturlNum = 0
             self.target_urls_per_domain = 10
             self.collected_urls = []
+            self.rejection_counts = {}
             self.exclude_keywords = []
             self._initialized = True
 
@@ -34,6 +35,7 @@ class Task:
         self.target_urls_per_domain = int(payload.get('target_urls_per_domain', self.target_urls_per_domain) or 40)
         self.requesturlNum = 0
         self.collected_urls = []
+        self.rejection_counts = {}
 
         # exclude_keywords: 文件存在则读取，否则空列表
         exclude_path = os.path.join(

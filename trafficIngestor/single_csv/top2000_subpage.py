@@ -11,7 +11,7 @@ CONFIG = {
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",
-        "subpages_merged.csv",
+        "yjn_subpages_merged.csv",
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"

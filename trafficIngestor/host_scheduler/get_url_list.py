@@ -60,7 +60,7 @@ BASE_NAME = "url_list_collector"
 # Docker 容器名前缀，格式为 "{用户名}_{BASE_NAME}"
 CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
 # Docker 容器池的容器数量
-CONTAINER_COUNT = 400
+CONTAINER_COUNT = 80
 # 宿主机上 url_list_collector 代码目录的绝对路径，会被挂载到容器内 /app
 HOST_CODE_PATH = os.path.join(_source_root, BASE_NAME)
 # 默认 Docker 镜像统一由 BaseTrafficIngestor.DOCKER_IMAGE 提供。
@@ -69,13 +69,13 @@ RETRY = 3
 DOCKER_DNS: Optional[str] = None
 
 # 源数据 CSV 文件路径，包含待爬取的网站列表
-SOURCE_CSV = os.path.join(_project_root, "scripts", "top4000.csv")
+SOURCE_CSV = os.path.join(_project_root, "scripts", "subpages_seeds.csv")
 # 输出结果的根目录，每个域名会在此目录下创建子目录存放 url_list.csv
-OUTPUT_BASE_DIR = "/netdisk/ww/top2000/subpages"
+OUTPUT_BASE_DIR = "/netdisk/yjn/20261008/subpages"
 # 记录失败任务的 CSV 文件路径
-FAILED_CSV = os.path.join(_current_dir, "get_url_list_failed.csv")
+FAILED_CSV = os.path.join(_current_dir, "woza.csv")
 # 每个域名需要采集的目标 URL 数量
-TARGET_URLS_PER_DOMAIN = 40
+TARGET_URLS_PER_DOMAIN = 30
 # 结束后是否清理容器和临时子目录（默认关闭，便于排查）
 CLEANUP_ON_EXIT = False
 # 启动前是否清理上一轮遗留的临时文件

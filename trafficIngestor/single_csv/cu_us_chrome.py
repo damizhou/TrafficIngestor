@@ -11,12 +11,12 @@ CONFIG = {
     "CLEAN_AND_RECREATE_CONTAINERS": True,
     "DOCKER_IMAGE": "chuanzhoupan/trace_spider:250912",
     "CONTAINER_COUNT": 100,
-    "BASE_DST": "/netdisk/yjn/20260914/us/chrome",
+    "BASE_DST": "/netdisk/yjn/20261009/homepage/",
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",
         "result",
-        "top15000_50_yjn.csv",
+        "yjn_subpages_seeds_40.csv",
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"

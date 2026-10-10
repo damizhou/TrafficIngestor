@@ -1,6 +1,7 @@
 import scrapy
 # 导入 logger 模块
 from utils.task import task_instance
+from utils.page_validation import is_page_url
 
 class TraceSpider(scrapy.Spider):
     name = "trace"
@@ -16,7 +17,7 @@ class TraceSpider(scrapy.Spider):
             full_url = response.urljoin(link)
 
             # 检查 URL 是否以 http 或 https 开头
-            if full_url.startswith('http'):
+            if is_page_url(full_url):
                 if 'analytics' in full_url and 'x.com' in full_url:
                     continue
                 # 剔除类似登录注册页面

@@ -12,7 +12,7 @@ CONFIG = {
         PROJECT_ROOT,
         "scripts",
         "result",
-        "subpages_merged.csv",
+        "yjn_subpages_merged.csv",
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"

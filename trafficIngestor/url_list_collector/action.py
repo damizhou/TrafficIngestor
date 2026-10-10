@@ -80,10 +80,11 @@ def main() -> None:
     logger.info("清理浏览器进程")
     kill_chrome_processes()
 
-    # 兜底：若未采集到任何 URL，至少保留种子 URL 以避免空结果
-    if not task_instance.collected_urls and url:
-        task_instance.collected_urls.append(url)
-        logger.warning("未采集到有效子链接，回退写入种子URL")
+    if task_instance.rejection_counts:
+        rejection_summary = "; ".join(
+            f"{reason}={count}" for reason, count in task_instance.rejection_counts.items()
+        )
+        error = "; ".join(part for part in (error, rejection_summary) if part)[:500]
 
     logger.info(
         f"{url} 流量收集结束，共爬取 {task_instance.requesturlNum} 个页面，"
@@ -97,6 +98,7 @@ def main() -> None:
         "collected_urls": task_instance.collected_urls,
         "visited_count": task_instance.requesturlNum,
         "error": error,
+        "rejection_counts": task_instance.rejection_counts,
     }
     write_result(container, result)
 

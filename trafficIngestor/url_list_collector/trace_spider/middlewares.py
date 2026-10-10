@@ -6,10 +6,14 @@ import time
 from scrapy import signals
 from scrapy.http import HtmlResponse
 from scrapy.exceptions import IgnoreRequest
+from selenium.common.exceptions import WebDriverException
 from urllib.parse import urlparse
 from utils.logger import logger
 from utils.chrome import create_chrome_driver
 from utils.task import task_instance
+from utils.page_validation import (
+    PAGE_SETTLE_SECONDS, PageRejected, is_page_url, read_validated_page,
+)
 
 
 
@@ -26,7 +30,7 @@ def _is_same_site(url: str) -> bool:
 
 
 def _should_collect(url: str) -> bool:
-    if not url.startswith(("http://", "https://")):
+    if not is_page_url(url):
         return False
     if not _is_same_site(url):
         return False
@@ -139,16 +143,36 @@ class TraceSpiderDownloaderMiddleware:
                 f"超过{task_instance.target_urls_per_domain}个页面限制，忽略请求"
             )
 
-        self.browser.get(request.url)
+        if not _should_collect(request.url):
+            self.reject_page(request.url, "filtered_request_url")
+        task_instance.requesturlNum += 1
         try:
-            task_instance.requesturlNum += 1
-            logger.info(f"requestURL:{self.browser.current_url}")
-            _collect_url(self.browser.current_url)
-            time.sleep(15)
-        except Exception as e:
-            logger.error(f"爬取 {request.url} 失败: {e}")
+            # Drain previous navigation events before associating this page with a response.
+            self.browser.get_log("performance")
+            self.browser.get(request.url)
+            time.sleep(PAGE_SETTLE_SECONDS)
+            snapshot, status = read_validated_page(self.browser)
+        except PageRejected as exc:
+            self.reject_page(request.url, str(exc))
+        except WebDriverException as exc:
+            logger.exception(f"浏览器访问失败: {request.url}")
+            self.reject_page(request.url, f"browser_error:{type(exc).__name__}")
 
-        return HtmlResponse(url=request.url, body=self.browser.page_source, encoding='utf-8', request=request)
+        final_url = snapshot["url"]
+        if not _should_collect(final_url):
+            self.reject_page(final_url, "filtered_final_url")
+        _collect_url(final_url)
+        logger.info(f"有效页面: status={status} requestURL:{final_url}")
+        return HtmlResponse(
+            url=final_url, status=status, body=snapshot["html"],
+            encoding='utf-8', request=request,
+        )
+
+    def reject_page(self, url, reason):
+        counts = task_instance.rejection_counts
+        counts[reason] = counts.get(reason, 0) + 1
+        logger.warning(f"拒绝采集页面: reason={reason} url={url}")
+        raise IgnoreRequest(reason)
 
     def process_response(self, request, response, spider):
         # Called with the response returned from the downloader.

@@ -7,7 +7,7 @@
 
 使用方式:
 - 默认运行: python scripts/code/merge_subpages_csv_to_one.py
-- 指定路径: python scripts/code/merge_subpages_csv_to_one.py --root-dir /netdisk/ww/top2000/subpages --output subpages_merged.csv
+- 指定路径: python scripts/code/merge_subpages_csv_to_one.py --root-dir /netdisk/ww/top2000/subpages --output yjn_subpages_merged.csv
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import List, Tuple
 
 
-DEFAULT_ROOT_DIR = "/netdisk/ww/top2000/subpages"
-DEFAULT_OUTPUT_NAME = "subpages_merged.csv"
+DEFAULT_ROOT_DIR = "/netdisk/yjn/20261008/subpages"
+DEFAULT_OUTPUT_NAME = "yjn_subpages_merged.csv"
 
 
 def collect_csv_files(root_dir: Path, output_csv: Path) -> List[Path]:

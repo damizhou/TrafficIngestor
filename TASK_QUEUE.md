@@ -1,6 +1,22 @@
 # 任务队列
 
-最后更新：2026-09-23 10:42:19
+最后更新：2026-10-10 00:00:00
+
+- [-] 新增 CSV 数据行随机打乱脚本，默认处理 merged_sensitive.csv 并输出独立结果文件；完成语法和临时样本验证（中，10 分钟）
+
+- [x] 已完成并验证：将 scripts/result/yjn_subpages_seeds.csv 的 80 条记录 id 全部设为 1；核对其他字段、表头及顺序不变，原文件已备份至 scripts/temp/yjn_subpages_seeds_before_id_change_20261009_095844.csv.bak - 2026-10-09 09:58:44
+
+- [x] 已完成并验证：按用户更正，仅删除 scripts/origin/subpages_merged.csv 中 id=1 的 80 条记录；修改前确认当前文件已恢复为与原备份一致的 2256 条，最终保留 2176 条，逐行核对内容、顺序及表头 - 2026-10-09 09:54:43
+
+- [x] 已完成并验证：原地筛选 scripts/origin/subpages_merged.csv，仅保留 id 2–21；2256 条保留 1520 条、移除 736 条，逐行核对顺序及表头，原文件已备份至 scripts/temp/subpages_merged_before_id_filter_20261009_095055.csv.bak - 2026-10-09 09:50:55
+
+- [x] 已完成并验证：URL 收集器按最终主文档真实状态和 HTML 类型校验，等待后读取最终地址及 DOM，过滤资源/下载/验证码/登录/错误/空白页，移除种子回填并记录拒绝原因；19 项离线回归通过，语法及 diff 检查通过，本机缺少 Scrapy/Selenium/Docker，未实跑浏览器采集 - 2026-10-09 09:39:03
+
+- [x] 已完成并验证：新增 convert_excel_domains_to_csv.py 并更新操作文档；语法检查通过，实际转换 subpages.xlsx 得到 80 个唯一域名，核对表头、连续 id 和 HTTPS URL 通过，未启动采集 - 2026-10-08 20:06:09
+
+- [x] 已完成并验证：子页面操作说明按 Excel 转种子 CSV、80 容器采集、合并 CSV 顺序重排；三个 Python 命令块语法检查和 diff 检查通过，注明容器池非固定绑定，未实跑采集 - 2026-10-08 19:58:41
+
+- [x] 已完成并验证：在 scripts/temp/subpages_30_commands.md 整理输入检查、环境准备、80 域名采集、CSV 合并及条数检查命令；核对现有入口、参数和文件路径，未实际启动采集 - 2026-10-08 13:11:39
 
 - [x] 已完成并验证：修复 `scripts/code/check_container_exit_ips.py` 目录重命名后错误计算项目根目录导致 profile 不存在 - 2026-09-23 10:42:19
 
