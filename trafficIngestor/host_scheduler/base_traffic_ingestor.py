@@ -87,11 +87,8 @@ class BaseTrafficIngestor(ABC):
     BASE_DST: str = ""
 
     # ============== 可选配置（有默认值）==============
-    # 动态容器数上限；未配置时使用 MAX_DYNAMIC_CONTAINER_COUNT。
-    CONTAINER_COUNT: Optional[int] = None
-    MAX_DYNAMIC_CONTAINER_COUNT: int = 600
-    DYNAMIC_CONTAINER_TASKS_PER_CONTAINER: int = 10
-    DYNAMIC_ONE_CONTAINER_PER_TASK_LIMIT: int = 50
+    # 容器池规模上限，默认 200；实际数量取它与任务数的较小值。
+    CONTAINER_COUNT: int = 200
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_chrome:153_260909"
     BROWSER_NAME: str = "chrome"
     BROWSER_VERSION_COMMANDS: Tuple[Tuple[str, ...], ...] = (
@@ -1090,48 +1087,30 @@ class BaseTrafficIngestor(ABC):
         return [f"{self.CONTAINER_PREFIX}{i}" for i in range(self.get_container_count())]
 
     def get_container_count(self) -> int:
-        """Return the resolved container count, or its configured upper bound."""
+        """Return the resolved container count, or the configured limit."""
         resolved = getattr(self, "_resolved_container_count", None)
         if resolved is not None:
             return max(int(resolved), 1)
+        return self.get_container_count_limit()
 
+    def get_container_count_limit(self) -> int:
+        """Return CONTAINER_COUNT, defaulting to 200 when it is not configured."""
         configured = getattr(self, "CONTAINER_COUNT", None)
         if configured is None:
-            return 1
+            return 200
         return max(int(configured), 1)
 
     def resolve_container_count(self, task_count: int) -> int:
-        """Resolve a task-count-based container count bounded by its configured maximum."""
-        configured = getattr(self, "CONTAINER_COUNT", None)
-        tasks_per_container = max(int(self.DYNAMIC_CONTAINER_TASKS_PER_CONTAINER), 1)
-        max_count = (
-            max(int(configured), 1)
-            if configured is not None
-            else max(int(self.MAX_DYNAMIC_CONTAINER_COUNT), 1)
-        )
-        task_count = max(int(task_count), 0)
-        one_per_task_limit = max(int(self.DYNAMIC_ONE_CONTAINER_PER_TASK_LIMIT), 0)
-        base_count = min(task_count, one_per_task_limit)
-        overflow_tasks = max(task_count - one_per_task_limit, 0)
-        overflow_count = (overflow_tasks + tasks_per_container - 1) // tasks_per_container
-        dynamic_count = base_count + overflow_count
-        return min(dynamic_count, max_count)
+        """Return min(CONTAINER_COUNT, task count) as the container pool size."""
+        return min(max(int(task_count), 0), self.get_container_count_limit())
 
     def configure_container_count_for_jobs(self, jobs: List[Dict[str, str]]) -> int:
         """Resolve and retain the actual pool size after the first task batch is known."""
-        configured = getattr(self, "CONTAINER_COUNT", None)
         count = self.resolve_container_count(len(jobs))
         self._resolved_container_count = count
-        max_count = (
-            max(int(configured), 1)
-            if configured is not None
-            else max(int(self.MAX_DYNAMIC_CONTAINER_COUNT), 1)
-        )
         self.log(
-            f"动态容器数={count}（任务数={len(jobs)}，"
-            f"前 {self.DYNAMIC_ONE_CONTAINER_PER_TASK_LIMIT} 个任务按一任务一容器，"
-            f"之后每 {self.DYNAMIC_CONTAINER_TASKS_PER_CONTAINER} 个任务增加一个容器，"
-            f"上限={max_count}）"
+            f"容器数={count}（任务数={len(jobs)}，"
+            f"上限={self.get_container_count_limit()}）"
         )
         return count
 

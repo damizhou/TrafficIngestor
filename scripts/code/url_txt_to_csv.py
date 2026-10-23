@@ -10,7 +10,12 @@
 
 输出格式与 wiki_firefox.csv 一致：
 id,url,domain
-1,https://x.com/example,x.com
+1,https://x.com/a,x.com
+2,https://x.com/b,x.com
+1,https://a.com/c,a.com
+
+id 规则：按 domain 分组，每个 domain 内从 start_id 开始依次递增，
+用于区分同一域名下的不同 URL。
 
 重复逻辑：
 - repeat_count=1: 输出 1 轮原始列表
@@ -29,8 +34,8 @@ from urllib.parse import urlparse
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SMALL_TOOLS_DIR = SCRIPT_DIR.parent
-DEFAULT_INPUT = SMALL_TOOLS_DIR / "origin" / "cl_url.txt"
-DEFAULT_OUTPUT = SMALL_TOOLS_DIR / "result" / f"{DEFAULT_INPUT.stem}_fra_chrome.csv"
+DEFAULT_INPUT = SMALL_TOOLS_DIR / "origin" / "github.txt"
+DEFAULT_OUTPUT = SMALL_TOOLS_DIR / "result" / f"github.csv"
 DEFAULT_REPEAT_COUNT = 1
 FIELDNAMES = ["id", "url", "domain"]
 
@@ -59,6 +64,7 @@ def extract_domain(url: str) -> str:
 def load_rows(input_path: Path, start_id: int, repeat_count: int) -> Tuple[List[dict], int]:
     base_rows: List[dict] = []
     blank_lines = 0
+    domain_counters: dict[str, int] = {}
 
     with input_path.open("r", encoding="utf-8-sig") as f:
         for line_number, raw_line in enumerate(f, start=1):
@@ -71,9 +77,10 @@ def load_rows(input_path: Path, start_id: int, repeat_count: int) -> Tuple[List[
             if not domain:
                 raise ValueError(f"invalid URL at line {line_number}: {raw_line.rstrip()}")
 
-            row_id = start_id + len(base_rows)
+            row_id = start_id + domain_counters.get(domain, 0)
+            domain_counters[domain] = domain_counters.get(domain, 0) + 1
             base_rows.append({
-                "id": 1,
+                "id": row_id,
                 "url": url,
                 "domain": domain,
             })
@@ -111,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--start-id",
         type=int,
         default=1,
-        help="起始 id，默认 1。",
+        help="每个 domain 内 id 的起始值，默认 1。",
     )
     parser.add_argument(
         "--repeat-count",

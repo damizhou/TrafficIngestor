@@ -1,8 +1,20 @@
 # 任务队列
 
-最后更新：2026-10-10 00:00:00
+最后更新：2026-10-23 17:01:23
 
-- [-] 新增 CSV 数据行随机打乱脚本，默认处理 merged_sensitive.csv 并输出独立结果文件；完成语法和临时样本验证（中，10 分钟）
+- [x] 已完成并验证：`CONTAINER_COUNT` 默认值调整为 200，容器池规模统一为 `min(CONTAINER_COUNT 或默认 200, 任务数)`；语法检查及边界验证通过 - 2026-10-23 17:01:23
+
+- [x] 已完成并验证：删除 `DYNAMIC_ONE_CONTAINER_PER_TASK_LIMIT`、`DYNAMIC_CONTAINER_TASKS_PER_CONTAINER` 与 `MAX_DYNAMIC_CONTAINER_COUNT`，容器池规模统一为 `min(CONTAINER_COUNT, 任务数)`，未配置时按 1 个容器运行；同步清理单 CSV/多 CSV 配置与 README，语法检查及边界验证通过 - 2026-10-23 16:58:38
+
+- [x] 已完成并验证：单 CSV Chrome 配置动态容器数按 URL 任务数计算并受 `CONTAINER_COUNT=100` 限制，语法检查及 0、1、99、100、101 条任务边界验证通过 - 2026-10-23 14:54:17
+
+- [x] 已完成并验证：修复 `scripts/code/url_txt_to_csv.py` 的 id 生成，改为按 domain 分组、每个域名内从 start_id 递增，用于区分同域名下不同 URL；语法检查及样本输出（含交错域名、repeat-count=2）核对通过 - 2026-10-23 14:36:44
+
+- [x] 已完成并验证：新增 `docs/服务器无人值守升级与systemd故障处理.md`，记录 systemd 故障诊断、重启恢复及关闭无人值守升级命令；文档 UTF-8 编码与内容核对通过 - 2026-10-22 20:15:32
+
+- [x] 已完成并验证：新增 `scripts/code/merge_sensitive_top200.py`，从 BBC、The Guardian、VOA 文件各取前 200 条并合并；语法检查和实际文件验证通过，生成测试结果 600 条后已清理测试文件 - 2026-10-10 15:42:07
+
+- [x] 已完成并验证：新增 `scripts/code/shuffle_csv_rows.py`，默认将 `merged_sensitive.csv` 的数据行随机打乱并输出独立文件；语法检查及临时样本验证通过，未修改原 CSV - 2026-10-10 15:05:19
 
 - [x] 已完成并验证：将 scripts/result/yjn_subpages_seeds.csv 的 80 条记录 id 全部设为 1；核对其他字段、表头及顺序不变，原文件已备份至 scripts/temp/yjn_subpages_seeds_before_id_change_20261009_095844.csv.bak - 2026-10-09 09:58:44
 

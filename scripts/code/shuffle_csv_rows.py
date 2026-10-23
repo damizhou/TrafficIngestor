@@ -12,8 +12,8 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCRIPTS_DIR = SCRIPT_DIR.parent
-DEFAULT_INPUT = SCRIPTS_DIR / "result" / "merged_sensitive.csv"
-DEFAULT_OUTPUT = SCRIPTS_DIR / "result" / "merged_sensitive_shuffled.csv"
+DEFAULT_INPUT = SCRIPTS_DIR / "result" / "dailymirror&nytimes.csv"
+DEFAULT_OUTPUT = SCRIPTS_DIR / "result" / "dailymirror&nytimes_shuffled.csv"
 
 
 def resolve_path(path: Path) -> Path:

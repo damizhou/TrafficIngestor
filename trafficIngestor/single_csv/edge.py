@@ -7,10 +7,16 @@ from single_csv._common import PROJECT_ROOT
 
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
-    "BASE_DST": "/netdisk2/ww/wiki/0325/edge",
+    "BASE_DST": "/netdisk/ww/github_cert/20261023/edge",
+    "CONTAINER_COUNT": 100,
     "DOCKER_IMAGE": "chuanzhoupan/trace_spider_edge:260309",
     "BROWSER_NAME": "edge",
     "BROWSER_VERSION_COMMANDS": (("microsoft-edge", "--version"),),
-    "CSV_PATH": os.path.join(PROJECT_ROOT, "scripts", "wiki_edge.csv"),
+    "CSV_PATH": os.path.join(
+        PROJECT_ROOT,
+        "scripts",
+        "result",
+        "github_cert_3_edge.csv",
+    )
 }
 ACTION_PROFILE = "tools/browsers/edge.py"
