@@ -1,6 +1,14 @@
 # 任务队列
 
-最后更新：2026-10-23 17:01:23
+最后更新：2026-11-03 22:28:00
+
+- [x] 已完成并验证：定位单 CSV Chrome「视频不播放」并新增起播触发。容器内实测：Google Chrome 153 对本地 mp4 与 videojs.com 均能正常解码（点击后 861 帧、currentTime 35.93、readyState 4），说明编解码与启动参数不是原因；根因是 `open_url_and_save_content` 只 `driver.get()` 后等 120 秒，全链路没有任何 `play()`／点击播放器／滚动到播放器的逻辑。新增 `_trigger_video_playback`（有 video 元素才点一次 + 静音 `play()` 兜底，并轮询确认时间轴推进、清理点击弹出的新窗口）后，同一页面同一窗口内 pcap 从 2.98 MB／3740 包提升到 24.7 MB／20239 包；`python -m py_compile` 通过 - 2026-11-03 22:28:00
+
+- [x] 已完成并验证：排查记录——NYT `nytimes.com/video/...` 在本服务器返回 403 + DataDome 验证码（`geo.captcha-delivery.com`），YouTube 返回 `LOGIN_REQUIRED / Sign in to confirm you're not a bot`（最小参数与伪装 UA 结果一致），mirror.co.uk 被 Reach consent 墙拦住（`<video>` 数量 0），dailymirror 的 video 源为 bilsyndication 广告端点（networkState=3）；这些属于站点风控/合规拦截，不经由 Chrome 启动参数解决 - 2026-11-03 22:28:00
+
+- [x] 已完成并验证：更新 README 与远程连接文档的单 CSV 配置入口用法；UTF-8、命令文件路径、配置语法及 diff 检查通过，未连接服务器或启动采集 - 2026-11-03 18:11:26
+
+- [x] 已完成并验证：修改 Firefox 自动播放策略，并将 Chrome/Firefox 页面打开后的等待时间统一为 120 秒 - 2026-10-28 10:30:12
 
 - [x] 已完成并验证：`CONTAINER_COUNT` 默认值调整为 200，容器池规模统一为 `min(CONTAINER_COUNT 或默认 200, 任务数)`；语法检查及边界验证通过 - 2026-10-23 17:01:23
 

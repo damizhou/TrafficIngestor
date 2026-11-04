@@ -7,7 +7,7 @@ from single_csv._common import PROJECT_ROOT
 
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
-    "BASE_DST": "/netdisk/ww/github_cert/20261023/firefox",
+    "BASE_DST": "/netdisk/lhx/20261028/firefox",
     "CONTAINER_COUNT": 100,
     "DOCKER_IMAGE": "chuanzhoupan/trace_spider_firefox:152.0.6",
     "BROWSER_NAME": "firefox",
@@ -16,7 +16,7 @@ CONFIG = {
         PROJECT_ROOT,
         "scripts",
         "result",
-        "github_cert_3_firefox.csv",
+        "dailymirror-video-1.csv",
     ),
 }
 ACTION_PROFILE = "tools/browsers/firefox.py"

@@ -283,6 +283,10 @@ def create_firefox_driver(task_name, formatted_time, parsers, data_base_dir=None
     opts.set_preference("network.trr.uri", "")
     opts.set_preference("security.OCSP.enabled", 0)
 
+    # 允许网页无需用户手势自动播放媒体（包括视频）。
+    opts.set_preference("media.autoplay.default", 0)
+    opts.set_preference("media.autoplay.blocking_policy", 0)
+
     # --- 降噪：遥测/实验/上报 ---
     opts.set_preference("app.update.enabled", False)
     opts.set_preference("app.update.auto", False)
@@ -424,7 +428,7 @@ def open_url_and_save_content(driver, url, ssl_key_file_path, logger=None, data_
         data_base_dir = _project_root
 
     driver.get(url)
-    time.sleep(30)
+    time.sleep(120)
 
     script = JS_SELECT_ALL_AND_COPY_CAPTURE + "\nreturn __select_all_and_copy_capture();"
     res = driver.execute_script(script)

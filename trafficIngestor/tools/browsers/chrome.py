@@ -2,6 +2,7 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException, WebDriverException
 import os
@@ -77,6 +78,64 @@ VIEWPORT_SCREENSHOT_TIMEOUT_SECS = 120
 CHROME_VIEWPORT_WIDTH = 3840
 CHROME_VIEWPORT_HEIGHT = 2160
 CHROME_DEVICE_SCALE_FACTOR = 1.0
+
+# 视频起播触发：页面打开后主动点一下播放器并确认时间轴推进，
+# 否则采集期只有封面图，pcap 中不会出现媒体流。
+ENABLE_VIDEO_PLAYBACK = True
+VIDEO_PLAYBACK_CLICK_SETTLE_SECS = 3.0
+VIDEO_PLAYBACK_CONFIRM_SECS = 20.0
+VIDEO_PLAYBACK_CONFIRM_SECS_WITHOUT_SOURCE = 6.0
+VIDEO_PLAYBACK_MIN_PROGRESS_SECS = 0.5
+VIDEO_PLAYBACK_POLL_INTERVAL_SECS = 1.0
+
+# 读取页面内所有 video 元素状态（含 open shadow DOM）。
+JS_COLLECT_VIDEO_STATES = r"""
+function __collectVideoStates(){
+  const videos = [];
+  const walk = (root) => {
+    root.querySelectorAll('video').forEach((v) => videos.push(v));
+    root.querySelectorAll('*').forEach((el) => { if (el.shadowRoot) walk(el.shadowRoot); });
+  };
+  walk(document);
+  return videos.map((v) => {
+    const rect = v.getBoundingClientRect();
+    return {
+      paused: v.paused,
+      currentTime: v.currentTime,
+      readyState: v.readyState,
+      networkState: v.networkState,
+      frames: v.webkitDecodedFrameCount === undefined ? -1 : v.webkitDecodedFrameCount,
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      hasSource: !!(v.currentSrc || v.getAttribute('src') || v.srcObject),
+    };
+  });
+}
+return __collectVideoStates();
+"""
+
+# 兜底的 JS 起播：静音播放，避免被自动播放策略拦下。
+JS_START_VIDEO_PLAYBACK = r"""
+function __startVideoPlayback(){
+  let started = 0;
+  const walk = (root) => {
+    root.querySelectorAll('video').forEach((v) => {
+      try {
+        if (!v.paused) return;
+        v.muted = true;
+        v.volume = 0;
+        const result = v.play();
+        if (result && typeof result.catch === 'function') result.catch(() => {});
+        started += 1;
+      } catch (e) {}
+    });
+    root.querySelectorAll('*').forEach((el) => { if (el.shadowRoot) walk(el.shadowRoot); });
+  };
+  walk(document);
+  return started;
+}
+return __startVideoPlayback();
+"""
 
 
 def _host_matches_domain(host, domain):
@@ -793,6 +852,136 @@ def _stop_page_loading(driver, logger, reason):
         _log_warning(logger, f"{reason}后停止页面加载失败: {type(e).__name__}: {e}")
 
 
+def _video_state_is_playing(state):
+    if not isinstance(state, dict):
+        return False
+    if state.get("currentTime", 0) > VIDEO_PLAYBACK_MIN_PROGRESS_SECS:
+        return True
+    return state.get("frames", 0) > 0
+
+
+def _collect_page_video_states(driver):
+    return driver.execute_script(JS_COLLECT_VIDEO_STATES) or []
+
+
+def _close_extra_browser_windows(driver, original_handles, logger=None):
+    """点击播放器可能触发新窗口，及时关掉以免产物和抓包被带偏。"""
+    try:
+        handles = driver.window_handles
+    except Exception as e:
+        _log_warning(logger, f"读取窗口列表失败: {type(e).__name__}: {e}")
+        return
+    for handle in handles:
+        if handle in original_handles:
+            continue
+        try:
+            driver.switch_to.window(handle)
+            driver.close()
+        except Exception as e:
+            _log_warning(logger, f"关闭视频点击弹出的窗口失败: {type(e).__name__}: {e}")
+    try:
+        if driver.window_handles and driver.current_window_handle not in original_handles:
+            driver.switch_to.window(original_handles[0])
+    except Exception as e:
+        _log_warning(logger, f"切回原始窗口失败: {type(e).__name__}: {e}")
+
+
+def _trigger_video_playback(driver, logger=None):
+    """页面打开后主动触发视频播放，确保采集窗口内存在真实媒体流量。
+
+    返回 True 表示确认到视频时间轴推进或已解码出帧。
+    """
+    if not ENABLE_VIDEO_PLAYBACK:
+        return False
+
+    try:
+        states = _collect_page_video_states(driver)
+    except Exception as e:
+        _log_warning(logger, f"读取页面视频状态失败: {type(e).__name__}: {e}")
+        return False
+
+    if not states:
+        return False
+
+    if any(_video_state_is_playing(state) for state in states):
+        if logger:
+            logger.info("视频检测: 页面视频已在播放，跳过触发")
+        return True
+
+    original_handles = []
+    try:
+        original_handles = driver.window_handles
+    except Exception:
+        original_handles = []
+
+    clicked = False
+    try:
+        elements = driver.find_elements(By.CSS_SELECTOR, "video")
+    except Exception as e:
+        _log_warning(logger, f"定位 video 元素失败: {type(e).__name__}: {e}")
+        elements = []
+
+    for element in elements:
+        try:
+            if not element.is_displayed():
+                continue
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            time.sleep(0.3)
+            element.click()
+            clicked = True
+            break
+        except Exception as e:
+            _log_warning(logger, f"点击 video 元素失败: {type(e).__name__}: {e}")
+
+    if not clicked:
+        try:
+            started = driver.execute_script(JS_START_VIDEO_PLAYBACK)
+        except Exception as e:
+            _log_warning(logger, f"JS 触发视频播放失败: {type(e).__name__}: {e}")
+            started = 0
+        if not started:
+            if logger:
+                logger.info("视频检测: 页面存在 video 元素但未能触发播放")
+            return False
+
+    time.sleep(VIDEO_PLAYBACK_CLICK_SETTLE_SECS)
+    if original_handles:
+        _close_extra_browser_windows(driver, original_handles, logger=logger)
+
+    deadline = time.time() + (
+        VIDEO_PLAYBACK_CONFIRM_SECS
+        if any(state.get("hasSource") for state in states)
+        else VIDEO_PLAYBACK_CONFIRM_SECS_WITHOUT_SOURCE
+    )
+    last_states = states
+    while time.time() < deadline:
+        try:
+            last_states = _collect_page_video_states(driver)
+        except Exception as e:
+            _log_warning(logger, f"确认视频播放状态失败: {type(e).__name__}: {e}")
+            break
+        if any(_video_state_is_playing(state) for state in last_states):
+            if logger:
+                logger.info(
+                    "视频检测: 起播成功，currentTime={}，已解码帧={}".format(
+                        round(float(last_states[0].get("currentTime") or 0), 2),
+                        last_states[0].get("frames"),
+                    )
+                )
+            return True
+        time.sleep(VIDEO_PLAYBACK_POLL_INTERVAL_SECS)
+
+    if logger:
+        first = last_states[0] if last_states else {}
+        logger.info(
+            "视频检测: 未确认起播，paused={}，readyState={}，networkState={}，有媒体源={}".format(
+                first.get("paused"), first.get("readyState"),
+                first.get("networkState"), first.get("hasSource"),
+            )
+        )
+    return False
+
+
 def _load_url_and_wait(driver, url, wait_secs, logger):
     page_load_timeout = max(int(wait_secs or 0), 60)
     page_loaded = True
@@ -940,7 +1129,8 @@ def open_url_and_save_content(driver, url, ssl_key_file_path, wait_secs=8,
         data_base_dir = _project_root
 
     page_loaded = _load_url_and_wait(driver, url, wait_secs, logger)
-    time.sleep(15)
+    _trigger_video_playback(driver, logger)
+    time.sleep(120)
 
     script = JS_SELECT_ALL_AND_COPY_CAPTURE + "\nreturn __select_all_and_copy_capture();"
     res = driver.execute_script(script)

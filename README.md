@@ -1,6 +1,6 @@
 # TrafficIngestor
 
-最后更新：2026-10-23 17:01:23
+最后更新：2026-11-03 18:17:10
 
 ## 项目简介
 TrafficIngestor 用于批量采集网页访问流量与页面内容。宿主机脚本负责管理 Docker 容器池、分发任务；容器内脚本负责驱动浏览器或 Scrapy 执行访问，并输出抓包文件、TLS 密钥日志、HTML、截图和文本内容。
@@ -71,13 +71,17 @@ id,url,domain
 
 单 CSV 采集配置统一位于 `trafficIngestor/single_csv/`，一个 `.py` 文件对应一种配置。HTTPS 与 Clash 入口使用同一套配置加载和校验逻辑，分别由 `trafficIngestor/host_scheduler/single_csv_profiles.py` 与 `trafficIngestor/host_scheduler_clash/single_csv_profiles.py` 启动。默认 Docker 镜像由 `BaseTrafficIngestor.DOCKER_IMAGE` 提供，Edge、Firefox、固定节点等特殊配置会显式覆盖所需字段。
 
-### 2. 修改配置并直接运行
+### 2. 修改配置并通过统一入口运行
 
-HTTPS 任务必须显式传入配置文件路径。修改 `trafficIngestor/single_csv/base.py` 中的 `CONFIG` 或 `ACTION_PROFILE` 后执行：
+以下命令均在项目根目录 `TrafficIngestor/` 下执行。单 CSV 任务的调用格式为 `python <调度入口> <配置文件路径>`，配置文件不作为独立采集脚本直接运行。相对配置路径按当前工作目录解析，也可以传入绝对路径。
+
+以默认 Chrome 配置为例，先核对 `trafficIngestor/single_csv/base.py` 中的 `CONFIG`：`CSV_PATH` 指向本次任务 CSV，`BASE_DST` 指向最终输出目录，`CONTAINER_COUNT` 设置并发上限，`DELETE_CSV_RECORD_ON_SUCCESS` 决定成功后是否删除输入记录；`ACTION_PROFILE` 指定浏览器模块。然后执行：
 
 ```powershell
 python trafficIngestor/host_scheduler/single_csv_profiles.py trafficIngestor/single_csv/base.py
 ```
+
+切换任务时替换最后一个配置路径，例如 Mastodon 使用 `trafficIngestor/single_csv/mastodon.py`；不再使用旧的 `traffic_capture_single_csv_mastodon.py` 独立宿主入口。远程服务器上的虚拟环境与 tmux 运行示例见本地文档 `REMOTE_SERVER_ACCESS.md`（不进入 Git 仓库）。
 
 Clash 任务同样显式传入配置文件路径。例如 GitHub Trojan 采集执行：
 

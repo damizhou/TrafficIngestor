@@ -52,7 +52,7 @@ class BatchAction:
         WebDriverWait(driver, wait_secs).until(
             lambda d: d.execute_script("return document.readyState") == "complete"
         )
-        time.sleep(15)  # 等待页面完全加载
+        time.sleep(120)  # 等待页面完全加载
 
     def start_batch_task(self, payload):
         """
