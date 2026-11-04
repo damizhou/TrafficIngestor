@@ -71,22 +71,41 @@ CHROME_BACKGROUND_BLOCKED_HOSTS = (
     "android.clients.google.com",
     "mtalk.google.com",
 )
+# 截图只是留证据，不需要高清：整页截图按 1/4 降采样输出（4K 视口保持不变，
+# 高清媒体资源依赖视口本身）。输出像素预算按降采样后的图像计算。
 MAX_SCREENSHOT_DEVICE_DIMENSION = 16384
-MAX_SCREENSHOT_DEVICE_PIXELS = 60_000_000
+MAX_SCREENSHOT_DEVICE_PIXELS = 8_000_000
+SCREENSHOT_CAPTURE_SCALE = 0.25
 FULL_PAGE_SCREENSHOT_TIMEOUT_SECS = 300
 VIEWPORT_SCREENSHOT_TIMEOUT_SECS = 120
 CHROME_VIEWPORT_WIDTH = 3840
 CHROME_VIEWPORT_HEIGHT = 2160
 CHROME_DEVICE_SCALE_FACTOR = 1.0
 
-# 视频起播触发：页面打开后主动点一下播放器并确认时间轴推进，
-# 否则采集期只有封面图，pcap 中不会出现媒体流。
+# 视频自动播放：页面打开后用静音 JS 拉起视频，否则采集期只有封面图，
+# pcap 中不会出现媒体流。启动参数已放开自动播放策略，无需滚动。
 ENABLE_VIDEO_PLAYBACK = True
-VIDEO_PLAYBACK_CLICK_SETTLE_SECS = 3.0
-VIDEO_PLAYBACK_CONFIRM_SECS = 20.0
-VIDEO_PLAYBACK_CONFIRM_SECS_WITHOUT_SOURCE = 6.0
+VIDEO_PLAYBACK_CONFIRM_SECS = 3.0
 VIDEO_PLAYBACK_MIN_PROGRESS_SECS = 0.5
-VIDEO_PLAYBACK_POLL_INTERVAL_SECS = 1.0
+VIDEO_PLAYBACK_POLL_INTERVAL_SECS = 0.5
+VIDEO_PLAYBACK_ELEMENT_WAIT_SECS = 5.0
+# 播放器拿到媒体源通常比页面加载晚十几秒，起播尝试要在该窗口内持续重试。
+VIDEO_PLAYBACK_RETRY_SECS = 60.0
+VIDEO_PLAYBACK_RETRY_INTERVAL_SECS = 2.0
+VIDEO_PLAYBACK_CLICK_RETRY_SECS = 10.0
+
+# consent 墙（CMP）：未同意时站点会禁用视频播放器（如 Primis 直接不下发 <video>），
+# 因此需要先点掉同意按钮，播放器才会被创建。
+ENABLE_CONSENT_ACCEPT = True
+CONSENT_SETTLE_SECS = 2.0
+
+# 点击兜底：视频广告播放器在 JS play() 之后仍可能保持暂停，需要一次真实点击才起播。
+ENABLE_VIDEO_CLICK_FALLBACK = True
+VIDEO_PLAYBACK_CLICK_SETTLE_SECS = 1.5
+VIDEO_PLAYBACK_CLICK_CONFIRM_SECS = 10.0
+
+# 页面加载完成后的采集窗口（秒）：期间保持页面活动，用于抓全流量与视频。
+POST_LOAD_CAPTURE_WAIT_SECS = 240
 
 # 读取页面内所有 video 元素状态（含 open shadow DOM）。
 JS_COLLECT_VIDEO_STATES = r"""
@@ -135,6 +154,89 @@ function __startVideoPlayback(){
   return started;
 }
 return __startVideoPlayback();
+"""
+
+# 点击 consent 弹层里的同意按钮（含 open shadow DOM 与同源 iframe）。
+JS_ACCEPT_CONSENT = r"""
+function __consentRoots(){
+  const roots = [document];
+  const walk = (root, depth) => {
+    if (depth > 3 || !root.querySelectorAll) return;
+    root.querySelectorAll('*').forEach((el) => {
+      if (el.shadowRoot) { roots.push(el.shadowRoot); walk(el.shadowRoot, depth + 1); }
+    });
+    root.querySelectorAll('iframe').forEach((frame) => {
+      try {
+        if (frame.contentDocument) { roots.push(frame.contentDocument); walk(frame.contentDocument, depth + 1); }
+      } catch (e) {}
+    });
+  };
+  walk(document, 0);
+  return roots;
+}
+function __consentLabel(el){
+  return ((el.innerText || el.textContent || '') + ' ' + (el.getAttribute('aria-label') || ''))
+    .replace(/\s+/g, ' ').trim().toLowerCase();
+}
+function __consentVisible(el){
+  try {
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width >= 4 && rect.height >= 4;
+  } catch (e) { return false; }
+}
+function __acceptConsent(){
+  const exact = ['accept all', 'accept', 'i accept', 'agree', 'i agree', 'allow all', 'got it',
+                 '\u540c\u610f', '\u63a5\u53d7\u5168\u90e8', '\u63a5\u53d7'];
+  const selector = 'button, a, [role="button"], input[type="button"], input[type="submit"]';
+  const roots = __consentRoots();
+  for (const label of exact) {
+    for (const root of roots) {
+      for (const el of Array.from(root.querySelectorAll(selector))) {
+        if (el.disabled || !__consentVisible(el)) continue;
+        if (__consentLabel(el) === label) { el.click(); return label; }
+      }
+    }
+  }
+  for (const root of roots) {
+    for (const el of Array.from(root.querySelectorAll(selector))) {
+      const label = __consentLabel(el);
+      if (!label || label.length > 40) continue;
+      if (!/(accept|agree)/.test(label)) continue;
+      if (/(reject|deny|decline|manage|settings|options|more)/.test(label)) continue;
+      if (el.disabled || !__consentVisible(el)) continue;
+      el.click();
+      return label;
+    }
+  }
+  return '';
+}
+return __acceptConsent();
+"""
+
+# 隐藏 CMP 留下的全屏遮罩层：qc-cmp 点完同意后仍会留一层 fixed 全屏 div，
+# 挡住播放器导致真实点击被拦截。
+JS_DISMISS_BLOCKING_OVERLAYS = r"""
+function __dismissBlockingOverlays(){
+  let hidden = 0;
+  const minWidth = window.innerWidth * 0.5;
+  const minHeight = window.innerHeight * 0.5;
+  document.querySelectorAll('div, section, aside').forEach((el) => {
+    const cls = (el.className && el.className.toString) ? el.className.toString() : '';
+    const id = el.id || '';
+    if (!/(qc-cmp|cmp-|consent|privacy|gdpr)/i.test(cls + ' ' + id)) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < minWidth || rect.height < minHeight) return;
+    const style = window.getComputedStyle(el);
+    if (style.position !== 'fixed' && style.position !== 'absolute') return;
+    el.style.setProperty('display', 'none', 'important');
+    el.style.setProperty('pointer-events', 'none', 'important');
+    hidden += 1;
+  });
+  return hidden;
+}
+return __dismissBlockingOverlays();
 """
 
 
@@ -855,6 +957,9 @@ def _stop_page_loading(driver, logger, reason):
 def _video_state_is_playing(state):
     if not isinstance(state, dict):
         return False
+    # paused=False 表示 play() 已被接受（可能仍在缓冲），视为已起播。
+    if state.get("paused") is False:
+        return True
     if state.get("currentTime", 0) > VIDEO_PLAYBACK_MIN_PROGRESS_SECS:
         return True
     return state.get("frames", 0) > 0
@@ -862,6 +967,29 @@ def _video_state_is_playing(state):
 
 def _collect_page_video_states(driver):
     return driver.execute_script(JS_COLLECT_VIDEO_STATES) or []
+
+
+def _accept_page_consent(driver, logger=None):
+    """点掉 consent 弹层里的同意按钮，返回被点击按钮的文本；没找到返回空串。
+
+    站点通常在未同意时不创建视频播放器（如 Primis 直接不下发 <video>），
+    所以这一步要排在触发播放之前。
+    """
+    if not ENABLE_CONSENT_ACCEPT:
+        return ""
+    try:
+        label = driver.execute_script(JS_ACCEPT_CONSENT)
+    except Exception as e:
+        _log_warning(logger, f"处理 consent 弹层失败: {type(e).__name__}: {e}")
+        return ""
+    if not label:
+        return ""
+    if logger:
+        logger.info(f"cookie 同意: 已点击「{label}」")
+    # CMP 点完同意后常留一层全屏遮罩，顺手清掉，否则后续点击播放器会被拦截。
+    _dismiss_blocking_overlays(driver, logger)
+    time.sleep(CONSENT_SETTLE_SECS)
+    return label
 
 
 def _close_extra_browser_windows(driver, original_handles, logger=None):
@@ -886,74 +1014,76 @@ def _close_extra_browser_windows(driver, original_handles, logger=None):
         _log_warning(logger, f"切回原始窗口失败: {type(e).__name__}: {e}")
 
 
-def _trigger_video_playback(driver, logger=None):
-    """页面打开后主动触发视频播放，确保采集窗口内存在真实媒体流量。
+def _wait_for_video_states(driver, deadline, logger=None):
+    """等待页面出现 video 元素（consent 通过后播放器是异步创建的）。"""
+    states = []
+    while time.time() < deadline:
+        try:
+            states = _collect_page_video_states(driver)
+        except Exception as e:
+            _log_warning(logger, f"读取页面视频状态失败: {type(e).__name__}: {e}")
+            break
+        if states:
+            return states
+        time.sleep(VIDEO_PLAYBACK_POLL_INTERVAL_SECS)
+    return states
 
-    返回 True 表示确认到视频时间轴推进或已解码出帧。
-    """
-    if not ENABLE_VIDEO_PLAYBACK:
-        return False
 
+def _dismiss_blocking_overlays(driver, logger=None):
+    """隐藏 CMP 遗留的全屏遮罩，避免播放器点击被拦截。"""
     try:
-        states = _collect_page_video_states(driver)
+        hidden = driver.execute_script(JS_DISMISS_BLOCKING_OVERLAYS)
     except Exception as e:
-        _log_warning(logger, f"读取页面视频状态失败: {type(e).__name__}: {e}")
-        return False
+        _log_warning(logger, f"隐藏 consent 遮罩失败: {type(e).__name__}: {e}")
+        return 0
+    if hidden and logger:
+        logger.info(f"cookie 同意: 已隐藏 {hidden} 个遗留遮罩层")
+    return hidden
 
-    if not states:
-        return False
 
-    if any(_video_state_is_playing(state) for state in states):
-        if logger:
-            logger.info("视频检测: 页面视频已在播放，跳过触发")
-        return True
-
+def _click_first_visible_video(driver, logger=None):
+    """点击兜底：视频广告播放器在 JS play() 后仍可能保持暂停，需要一次真实点击。"""
     original_handles = []
     try:
         original_handles = driver.window_handles
     except Exception:
         original_handles = []
 
-    clicked = False
+    _dismiss_blocking_overlays(driver, logger)
+
     try:
         elements = driver.find_elements(By.CSS_SELECTOR, "video")
     except Exception as e:
         _log_warning(logger, f"定位 video 元素失败: {type(e).__name__}: {e}")
-        elements = []
+        return False
 
     for element in elements:
         try:
             if not element.is_displayed():
                 continue
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            driver.execute_script("arguments[0].scrollIntoView({block: 'nearest'});", element)
             time.sleep(0.3)
-            element.click()
-            clicked = True
-            break
+            try:
+                element.click()
+            except WebDriverException as e:
+                # 遮罩仍在前台时退回 JS 点击，绕过命中测试。
+                _log_warning(logger, f"真实点击被拦截，改用 JS 点击: {type(e).__name__}")
+                driver.execute_script("arguments[0].click();", element)
         except Exception as e:
             _log_warning(logger, f"点击 video 元素失败: {type(e).__name__}: {e}")
+            continue
 
-    if not clicked:
-        try:
-            started = driver.execute_script(JS_START_VIDEO_PLAYBACK)
-        except Exception as e:
-            _log_warning(logger, f"JS 触发视频播放失败: {type(e).__name__}: {e}")
-            started = 0
-        if not started:
-            if logger:
-                logger.info("视频检测: 页面存在 video 元素但未能触发播放")
-            return False
+        time.sleep(VIDEO_PLAYBACK_CLICK_SETTLE_SECS)
+        if original_handles:
+            _close_extra_browser_windows(driver, original_handles, logger=logger)
+        return True
 
-    time.sleep(VIDEO_PLAYBACK_CLICK_SETTLE_SECS)
-    if original_handles:
-        _close_extra_browser_windows(driver, original_handles, logger=logger)
+    return False
 
-    deadline = time.time() + (
-        VIDEO_PLAYBACK_CONFIRM_SECS
-        if any(state.get("hasSource") for state in states)
-        else VIDEO_PLAYBACK_CONFIRM_SECS_WITHOUT_SOURCE
-    )
-    last_states = states
+
+def _wait_for_video_playback(driver, deadline, logger=None):
+    """轮询等待视频时间轴推进，返回 (是否起播, 最后一次读到的状态列表)。"""
+    last_states = []
     while time.time() < deadline:
         try:
             last_states = _collect_page_video_states(driver)
@@ -961,20 +1091,92 @@ def _trigger_video_playback(driver, logger=None):
             _log_warning(logger, f"确认视频播放状态失败: {type(e).__name__}: {e}")
             break
         if any(_video_state_is_playing(state) for state in last_states):
-            if logger:
-                logger.info(
-                    "视频检测: 起播成功，currentTime={}，已解码帧={}".format(
-                        round(float(last_states[0].get("currentTime") or 0), 2),
-                        last_states[0].get("frames"),
-                    )
-                )
-            return True
+            return True, last_states
         time.sleep(VIDEO_PLAYBACK_POLL_INTERVAL_SECS)
+    return False, last_states
+
+
+def _log_video_playback_started(logger, states, source):
+    if not logger:
+        return
+    first = states[0] if states else {}
+    logger.info(
+        "视频检测: {}起播，currentTime={}，已解码帧={}".format(
+            source,
+            round(float(first.get("currentTime") or 0), 2),
+            first.get("frames"),
+        )
+    )
+
+
+def _trigger_video_playback(driver, logger=None):
+    """拉起页面视频，确保采集窗口内存在真实媒体流量。
+
+    顺序：等 video 元素出现 → 静音 JS play()（启动参数已放开自动播放策略）→
+    仍不起播时退化为一次真实点击（视频广告播放器常要求交互）。
+    没有 video 元素的页面直接跳过，不产生额外等待。
+    返回 True 表示确认到视频已进入播放状态。
+    """
+    if not ENABLE_VIDEO_PLAYBACK:
+        return False
+
+    # 先确认页面存在播放器；没有 video 元素的页面立即跳过，不引入等待。
+    states = _wait_for_video_states(
+        driver, time.time() + VIDEO_PLAYBACK_ELEMENT_WAIT_SECS, logger
+    )
+    if not states:
+        return False
+
+    # 播放器拿到媒体源通常比页面加载晚十几秒，期间持续重试 JS 起播与点击兜底。
+    deadline = time.time() + VIDEO_PLAYBACK_RETRY_SECS
+    last_click_at = 0.0
+    while True:
+        if any(_video_state_is_playing(state) for state in states):
+            _log_video_playback_started(logger, states, "自动播放")
+            return True
+
+        if any(state.get("hasSource") for state in states):
+            try:
+                driver.execute_script(JS_START_VIDEO_PLAYBACK)
+            except Exception as e:
+                _log_warning(logger, f"JS 触发视频播放失败: {type(e).__name__}: {e}")
+
+            playing, states = _wait_for_video_playback(
+                driver, time.time() + VIDEO_PLAYBACK_CONFIRM_SECS, logger
+            )
+            if playing:
+                _log_video_playback_started(logger, states, "JS 自动播放")
+                return True
+
+        if (
+            ENABLE_VIDEO_CLICK_FALLBACK
+            and time.time() - last_click_at >= VIDEO_PLAYBACK_CLICK_RETRY_SECS
+            and _click_first_visible_video(driver, logger=logger)
+        ):
+            last_click_at = time.time()
+            playing, states = _wait_for_video_playback(
+                driver, time.time() + VIDEO_PLAYBACK_CLICK_CONFIRM_SECS, logger
+            )
+            if playing:
+                _log_video_playback_started(logger, states, "点击")
+                return True
+
+        if time.time() >= deadline:
+            break
+
+        time.sleep(VIDEO_PLAYBACK_RETRY_INTERVAL_SECS)
+        try:
+            states = _collect_page_video_states(driver)
+        except Exception as e:
+            _log_warning(logger, f"读取页面视频状态失败: {type(e).__name__}: {e}")
+            return False
+        if not states:
+            return False
 
     if logger:
-        first = last_states[0] if last_states else {}
+        first = states[0] if states else {}
         logger.info(
-            "视频检测: 未确认起播，paused={}，readyState={}，networkState={}，有媒体源={}".format(
+            "视频检测: 未起播，paused={}，readyState={}，networkState={}，有媒体源={}".format(
                 first.get("paused"), first.get("readyState"),
                 first.get("networkState"), first.get("hasSource"),
             )
@@ -1129,8 +1331,9 @@ def open_url_and_save_content(driver, url, ssl_key_file_path, wait_secs=8,
         data_base_dir = _project_root
 
     page_loaded = _load_url_and_wait(driver, url, wait_secs, logger)
+    _accept_page_consent(driver, logger)
     _trigger_video_playback(driver, logger)
-    time.sleep(120)
+    time.sleep(POST_LOAD_CAPTURE_WAIT_SECS)
 
     script = JS_SELECT_ALL_AND_COPY_CAPTURE + "\nreturn __select_all_and_copy_capture();"
     res = driver.execute_script(script)
@@ -1165,7 +1368,10 @@ def open_url_and_save_content(driver, url, ssl_key_file_path, wait_secs=8,
 def screenshot_full_page(driver: webdriver.Chrome, out_path: Path, dpr: Optional[float] = None,
                          logger=None) -> None:
     """
-    整页长截图：通过 CDP 获取内容尺寸并原生捕获，超出浏览器限制时截取可保存区域。
+    整页长截图：通过 CDP 按 clip 直接捕获，并按 SCREENSHOT_CAPTURE_SCALE 降采样输出。
+
+    视口保持 4K 不修改（高清媒体资源依赖该视口），只对截图做缩放，
+    避免把视口撑到整页高度导致整页重排、渲染进程崩溃。
 
     Args:
         driver: WebDriver实例
@@ -1190,56 +1396,43 @@ def screenshot_full_page(driver: webdriver.Chrome, out_path: Path, dpr: Optional
         ))
 
     device_scale = float(dpr) if dpr and dpr > 0 else 1.0
-    max_css_width = max(1, int(MAX_SCREENSHOT_DEVICE_DIMENSION / device_scale))
+    capture_scale = SCREENSHOT_CAPTURE_SCALE if SCREENSHOT_CAPTURE_SCALE > 0 else 1.0
+    # 输出图像里 1 CSS px 对应的像素数
+    output_scale = device_scale * capture_scale
+
+    max_css_width = max(1, int(MAX_SCREENSHOT_DEVICE_DIMENSION / output_scale))
     capture_width = min(width, max_css_width)
-    max_css_height_by_dimension = max(1, int(MAX_SCREENSHOT_DEVICE_DIMENSION / device_scale))
+    max_css_height_by_dimension = max(1, int(MAX_SCREENSHOT_DEVICE_DIMENSION / output_scale))
     max_css_height_by_pixels = max(
         1,
-        int(MAX_SCREENSHOT_DEVICE_PIXELS / max(capture_width * device_scale * device_scale, 1.0)),
+        int(MAX_SCREENSHOT_DEVICE_PIXELS / max(capture_width * output_scale * output_scale, 1.0)),
     )
     capture_height = min(height, max_css_height_by_dimension, max_css_height_by_pixels)
 
     if capture_width != width or capture_height != height:
         _log_warning(
             logger,
-            "整页截图尺寸超过Chrome限制，"
-            f"从 {width}x{height}@{device_scale:g} 截断为 {capture_width}x{capture_height}@{device_scale:g}",
+            "整页截图超过输出上限，"
+            f"从 {width}x{height} 截断为 {capture_width}x{capture_height}"
+            f"（输出约 {round(capture_width * output_scale)}x{round(capture_height * output_scale)}）",
         )
 
-    metrics_overridden = False
-    try:
-        # 覆盖设备度量，扩大视窗到待截图区域
-        driver.execute_cdp_cmd("Emulation.setDeviceMetricsOverride", {
-            "mobile": False,
+    # 不修改设备度量：captureBeyondViewport 本身即可截视口外的区域。
+    data = driver.execute_cdp_cmd("Page.captureScreenshot", {
+        "fromSurface": True,
+        "captureBeyondViewport": True,
+        "clip": {
+            "x": 0,
+            "y": 0,
             "width": capture_width,
             "height": capture_height,
-            "deviceScaleFactor": device_scale,
-            "screenOrientation": {"type": "landscapePrimary", "angle": 0},
-        })
-        metrics_overridden = True
-
-        # 捕获位图（b64）
-        data = driver.execute_cdp_cmd("Page.captureScreenshot", {
-            "fromSurface": True,
-            "captureBeyondViewport": True,
-            "clip": {
-                "x": 0,
-                "y": 0,
-                "width": capture_width,
-                "height": capture_height,
-                "scale": 1,
-            },
-        })
-        png_b64 = data.get("data")
-        if not png_b64:
-            raise RuntimeError("Page.captureScreenshot returned no data")
-        out_path.write_bytes(base64.b64decode(png_b64))
-    finally:
-        if metrics_overridden:
-            try:
-                driver.execute_cdp_cmd("Emulation.clearDeviceMetricsOverride", {})
-            except Exception as e:
-                _log_warning(logger, f"恢复Chrome设备度量失败: {type(e).__name__}: {e}")
+            "scale": capture_scale,
+        },
+    })
+    png_b64 = data.get("data")
+    if not png_b64:
+        raise RuntimeError("Page.captureScreenshot returned no data")
+    out_path.write_bytes(base64.b64decode(png_b64))
 
 
 def kill_chrome_processes():
