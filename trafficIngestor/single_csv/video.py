@@ -8,7 +8,7 @@ from single_csv._common import PROJECT_ROOT
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
     "BASE_DST": "/netdisk/lhx/20261104/chrome_video",
-    "CONTAINER_COUNT": 10,
+    "CONTAINER_COUNT": 30,
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",

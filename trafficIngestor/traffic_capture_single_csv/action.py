@@ -143,13 +143,15 @@ class ConfiguredCaptureAction(BaseAction):
                 self.log_clash_runtime_diagnostics()
             raise
 
-    def inspect_loaded_page(self, browser, requested_url, current_url, content_path, html_path):
+    def inspect_loaded_page(self, browser, requested_url, current_url, content_path, html_path,
+                            page_html=None):
         validation = super().inspect_loaded_page(
             browser,
             requested_url,
             current_url,
             content_path,
             html_path,
+            page_html=page_html,
         )
         if validation.get("http_status"):
             return validation

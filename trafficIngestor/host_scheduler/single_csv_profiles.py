@@ -25,8 +25,10 @@ for _import_root in (_project_root, _source_root):
         sys.path.insert(0, _import_root)
 
 from host_scheduler.base_traffic_ingestor import BaseTrafficIngestor
+from host_scheduler.batch_csv_ingestor import BatchCsvTaskSourceMixin
 from host_scheduler.csv_ingestor_common import (
     CsvIngestorProfile,
+    CsvTaskSourceMixin,
     ProfileDefinition,
     RunPolicy,
     build_profile_ingestor,
@@ -41,6 +43,7 @@ RUN_POLICY = RunPolicy(
     stop_on_false=True,
     require_pending_jobs=True,
 )
+BATCH_RUN_POLICY = RunPolicy(max_runs=1)
 
 
 def load_profile_definition(config_path: str | Path) -> ProfileDefinition:
@@ -54,10 +57,28 @@ def build_ingestor(
     class_name: str = "TrafficIngestor",
 ) -> Type[BaseTrafficIngestor]:
     profile_attributes = dict(definition.profile.class_attributes)
+    batch_by_domain = profile_attributes.pop("BATCH_BY_DOMAIN", False)
+    if not isinstance(batch_by_domain, bool):
+        raise TypeError("BATCH_BY_DOMAIN 必须是布尔值")
+    if batch_by_domain and definition.action_profile != "tools/browsers/chrome.py":
+        raise ValueError("按域名批量采集目前只支持 tools/browsers/chrome.py")
+    if batch_by_domain and not profile_attributes.get("MOUNT_CODE_IN_CONTAINERS", True):
+        raise ValueError("按域名批量采集需要 MOUNT_CODE_IN_CONTAINERS=True")
+    group_size = profile_attributes.get("BATCH_GROUP_SIZE", 10)
+    if batch_by_domain and (type(group_size) is not int or group_size <= 0):
+        raise ValueError("BATCH_GROUP_SIZE 必须是正整数")
+    for timing_name in ("BATCH_PAGE_WAIT_SECONDS", "BATCH_PAGE_GAP_SECONDS"):
+        timing_value = profile_attributes.get(timing_name)
+        if timing_value is None:
+            continue
+        if (isinstance(timing_value, bool)
+                or not isinstance(timing_value, (int, float))
+                or timing_value < 0):
+            raise ValueError(f"{timing_name} 必须是非负数")
     profile_attributes["ACTION_PROFILE"] = definition.action_profile
     configured_profile = CsvIngestorProfile(
         profile_attributes,
-        RUN_POLICY,
+        BATCH_RUN_POLICY if batch_by_domain else RUN_POLICY,
     )
     return build_profile_ingestor(
         BaseTrafficIngestor,
@@ -66,6 +87,7 @@ def build_ingestor(
         definition.profile_name,
         definition.runtime_name,
         configured_profile,
+        task_source_class=BatchCsvTaskSourceMixin if batch_by_domain else CsvTaskSourceMixin,
     )
 
 
@@ -73,7 +95,8 @@ def run_profile(
     definition: ProfileDefinition,
     ingestor_class: Type[BaseTrafficIngestor],
 ) -> None:
-    run_with_policy(ingestor_class, RUN_POLICY)
+    batch_by_domain = definition.profile.class_attributes.get("BATCH_BY_DOMAIN", False)
+    run_with_policy(ingestor_class, BATCH_RUN_POLICY if batch_by_domain else RUN_POLICY)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

@@ -1244,6 +1244,8 @@ def build_profile_ingestor(
     profile_name: str,
     runtime_name: str,
     profile: CsvIngestorProfile,
+    *,
+    task_source_class: type[CsvTaskSourceMixin] = CsvTaskSourceMixin,
 ) -> Type[BaseTrafficIngestor]:
     """按 profile 动态创建类，同时保留原入口名称作为运行身份。"""
 
@@ -1258,7 +1260,7 @@ def build_profile_ingestor(
             "PROFILE_NAME": profile_name,
         }
     )
-    return type(class_name, (CsvTaskSourceMixin, base_class), attributes)
+    return type(class_name, (task_source_class, base_class), attributes)
 
 
 def run_with_policy(

@@ -7,13 +7,13 @@ from single_csv._common import PROJECT_ROOT
 
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
-    "BASE_DST": "/netdisk/lhx/20261104/chrome",
-    "CONTAINER_COUNT": 10,
+    "BASE_DST": "/netdisk/lhx/20261105/chrome",
+    "CONTAINER_COUNT": 15,
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",
         "result",
-        "dailymirror-video.csv",
+        "dailymirror-txt.csv",
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"

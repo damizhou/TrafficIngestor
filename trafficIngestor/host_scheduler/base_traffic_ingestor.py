@@ -2269,12 +2269,20 @@ class BaseTrafficIngestor(ABC):
         while not self._stop_tasks_event.is_set():
             try:
                 wait_timeout = max(float(self.WORKER_QUEUE_WAIT_TIMEOUT), 0.0)
+                if getattr(self, "_retry_container_pool", ()):
+                    # 保留空闲 worker，等待在途任务失败后交给其它容器。
+                    wait_timeout = max(wait_timeout, 0.1)
                 if wait_timeout > 0:
                     task = q.get(timeout=wait_timeout)
                 else:
                     task = q.get_nowait()
             except queue.Empty:
                 if self.should_wait_for_more_tasks():
+                    continue
+                if (
+                    getattr(self, "_retry_container_pool", ())
+                    and self.get_unfinished_task_count(q) > 0
+                ):
                     continue
                 return
 
@@ -2283,7 +2291,20 @@ class BaseTrafficIngestor(ABC):
                     return
                 row_id = task.get("row_id", "")
                 url = task.get("url", "")
+                container_history = task.setdefault("_container_history", [])
+                retry_pool = getattr(self, "_retry_container_pool", ())
+                if (
+                    container_history
+                    and container in container_history
+                    and any(name not in container_history for name in retry_pool)
+                ):
+                    q.put(task)
+                    time.sleep(0.05)
+                    continue
                 task["container"] = container
+                container_history.append(container)
+                task["container_attempt"] = len(container_history)
+                task["container_history"] = list(container_history)
 
                 # 记录重试次数和首次开始时间
                 attempt = task.get("_retry_count", 0)
@@ -2381,37 +2402,38 @@ class BaseTrafficIngestor(ABC):
 
         stats: Dict[str, Any] = {"ok": 0, "fail": 0, "errors": []}
         self.log(f"开始执行：jobs={len(jobs)}，并发容器={len(names)}，镜像={self.DOCKER_IMAGE}")
+        self._retry_container_pool = tuple(names)
 
-        with ThreadPoolExecutor(max_workers=len(names)) as pool:
-            futures = [
-                pool.submit(self.worker_loop, n, q, stats, self.RETRY)
-                for n in names
-            ]
-            while True:
-                unfinished = self.get_unfinished_task_count(q)
-                for name, future in zip(names, futures):
-                    if future.done():
-                        exc = future.exception()
-                        if exc is not None:
-                            if isinstance(exc, FatalIngestorError):
-                                self.record_fatal_error(exc)
-                                raise exc
-                            raise RuntimeError(
-                                f"worker {name} 异常退出，队列未完成任务数={unfinished}: {exc!r}"
-                            ) from exc
-
-                if unfinished == 0:
-                    break
-
-                if all(future.done() for future in futures):
-                    raise RuntimeError(
-                        f"所有 worker 已退出，但队列仍有 {unfinished} 个未完成任务"
-                    )
-
-                time.sleep(1.0)
-
-            for future in futures:
-                future.result()
+        try:
+            with ThreadPoolExecutor(max_workers=len(names)) as pool:
+                futures = [
+                    pool.submit(self.worker_loop, n, q, stats, self.RETRY)
+                    for n in names
+                ]
+                while True:
+                    unfinished = self.get_unfinished_task_count(q)
+                    for name, future in zip(names, futures):
+                        if future.done():
+                            exc = future.exception()
+                            if exc is not None:
+                                self._stop_tasks_event.set()
+                                if isinstance(exc, FatalIngestorError):
+                                    self.record_fatal_error(exc)
+                                    raise exc
+                                raise RuntimeError(
+                                    f"worker {name} 异常退出，队列未完成任务数={unfinished}: {exc!r}"
+                                ) from exc
+                    if unfinished == 0:
+                        break
+                    if all(future.done() for future in futures):
+                        raise RuntimeError(
+                            f"所有 worker 已退出，但队列仍有 {unfinished} 个未完成任务"
+                        )
+                    time.sleep(1.0)
+                for future in futures:
+                    future.result()
+        finally:
+            self._retry_container_pool = ()
 
         return stats
 

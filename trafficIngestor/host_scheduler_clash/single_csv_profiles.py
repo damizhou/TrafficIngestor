@@ -51,6 +51,11 @@ def build_ingestor(
     class_name: str = "TrafficIngestor",
 ) -> Type[BaseTrafficIngestor]:
     profile_attributes = dict(definition.profile.class_attributes)
+    if profile_attributes.get("BATCH_BY_DOMAIN"):
+        raise ValueError(
+            f"配置文件 {definition.source_path} 使用 BATCH_BY_DOMAIN，"
+            "请改用非 Clash 入口 host_scheduler/single_csv_profiles.py"
+        )
     profile_attributes.update(
         {
             "ACTION_PROFILE": definition.action_profile,

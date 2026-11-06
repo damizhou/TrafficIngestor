@@ -291,8 +291,13 @@ class BaseAction(ABC):
 
         return score >= 3, signals
 
-    def inspect_loaded_page(self, browser, requested_url, current_url, content_path, html_path):
-        """Collect final-navigation status and page-level challenge signals."""
+    def inspect_loaded_page(self, browser, requested_url, current_url, content_path, html_path,
+                            page_html=None):
+        """Collect final-navigation status and page-level challenge signals.
+
+        ``page_html`` lets callers that do not persist HTML (for example the
+        grouped capture) still reuse the same challenge detection.
+        """
         navigation = {}
         try:
             navigation = browser.execute_script(
@@ -319,7 +324,7 @@ class BaseAction(ABC):
         body_text = str(navigation.get("bodyText") or "")
         if not body_text:
             body_text = self._read_page_text(content_path, limit=200_000)
-        html = self._read_page_text(html_path)
+        html = page_html if page_html is not None else self._read_page_text(html_path)
         human_verification, verification_signals = self.detect_human_verification(
             title,
             body_text,

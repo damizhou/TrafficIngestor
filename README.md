@@ -1,6 +1,6 @@
 # TrafficIngestor
 
-最后更新：2026-11-03 18:17:10
+最后更新：2026-11-06 13:03:06
 
 ## 项目简介
 TrafficIngestor 用于批量采集网页访问流量与页面内容。宿主机脚本负责管理 Docker 容器池、分发任务；容器内脚本负责驱动浏览器或 Scrapy 执行访问，并输出抓包文件、TLS 密钥日志、HTML、截图和文本内容。
@@ -105,10 +105,31 @@ python trafficIngestor/host_scheduler_clash/single_csv_profiles.py trafficIngest
   Edge 测试或定向采集
 - `python trafficIngestor/host_scheduler/single_csv_profiles.py trafficIngestor/single_csv/firefox.py`
   Firefox 测试或定向采集
+- `python trafficIngestor/host_scheduler/single_csv_profiles.py trafficIngestor/single_csv/batch.py`
+  SiteBench 分组采集：读取 `scripts/result/SiteBench_subpages_110site_120.csv`，同一网站每 10 个页面组成一组，组内连续访问并共用一个 pcap；10 个页面全部成功且共享产物有效才算成功，失败整组重试。
 - `python trafficIngestor/host_scheduler/traffic_capture_single_db.py`
   从数据库读取新闻 URL 批量采集
 - `python trafficIngestor/host_scheduler/get_url_list.py`
   批量采集站点子页面 URL
+
+#### 按网站分组采集（10 页共享一份抓包）
+
+`trafficIngestor/single_csv/batch.py` 把 CSV 里同一域名的连续 10 行作为一个采集组：一组只做一次 `docker exec`，顺序访问 10 个页面，共用一份 pcap 和一份 SSL keylog。组内任一页面失败（含 HTTP 4xx/5xx、人机验证、浏览器异常）或抓包/密钥产物校验不通过，整组即失败：产物不迁移、CSV 的 10 行全部保留，并按下一次整组重试；只有整组成功才把 pcap、keylog 和访问清单 `manifest` 一起归档，并登记删除这 10 行。
+
+```powershell
+python trafficIngestor/host_scheduler/single_csv_profiles.py trafficIngestor/single_csv/batch.py
+```
+
+配置要点：
+
+- `BATCH_BY_DOMAIN`：打开按域名分组；只支持非 Clash 入口和 `ACTION_PROFILE = "tools/browsers/chrome.py"`。
+- `BATCH_GROUP_SIZE`：每组页数（默认 10）。每个域名在 CSV 中的行数必须是它的整数倍，重复轮次按出现顺序各自成组。
+- 每次执行记录 `container_attempt` 和 `container_history`（容器名称），随任务传入容器并写入结果 manifest。重试优先使用该任务尚未尝试的容器，容器池用完后允许复用；当前配置 `RETRY=1`，最多执行两次。
+- 同域名按 CSV 出现顺序分组，组内 10 页串行访问；跨组由多个容器并发执行，不保证全局开始或完成顺序。
+- `BATCH_PAGE_WAIT_SECONDS` / `BATCH_PAGE_GAP_SECONDS`：单页驻留时间与页间隔（默认 120 / 15 秒），也决定 `DOCKER_EXEC_TIMEOUT` 的下限。
+- `RETRY`：失败组的重试次数，每次重试都会重新访问整组页面。
+
+产物结构为 `BASE_DST/data/<domain>/pcap/*.pcap`、`ssl_key/*_ssl_key.log` 和 `manifest/*.json`，一份 pcap 对应一组页面；运行结束会打印 `分组任务完整度校验`，给出期望组数、匹配组数、缺失组数和页数统计。
 
 ### 3. 查看结果
 运行期间，中间文件会先写入容器挂载目录，例如：
@@ -120,7 +141,7 @@ python trafficIngestor/host_scheduler_clash/single_csv_profiles.py trafficIngest
 - `screenshot/YYYYMMDD/*.png`
 - `meta/{container}_last.json`
 
-宿主机调度脚本成功后会把结果移动到对应采集器的 `BASE_DST` 目录。
+宿主机调度脚本成功后会把结果移动到对应采集器的 `BASE_DST` 目录。分组采集只归档 `pcap`、`ssl_key` 和 `manifest` 三类产物，路径为 `BASE_DST/data/<domain>/{pcap,ssl_key,manifest}/`。
 
 ## 配置说明
 
@@ -136,6 +157,8 @@ python trafficIngestor/host_scheduler_clash/single_csv_profiles.py trafficIngest
 `RETRY = 5`、`RESULT_DOMAIN_ROOT_DIR = "data"`、`TASK_CSV_DATA_ROOT_LAYOUT = True` 和 `SUCCESS_DELETE_GUARD_FIELD = "url"` 已固定在 `BaseTrafficIngestor`，单 CSV 配置文件无需重复声明。
 
 `ACTION_PROFILE` 直接填写源码根目录下的浏览器 Python 文件路径，例如 `tools/browsers/chrome.py`、`tools/browsers/edge.py`、`tools/browsers/firefox.py` 或 `tools/browsers/firefox_ech.py`。入口会在启动前检查文件是否存在，并根据模块实际暴露的驱动函数识别浏览器类型；新增浏览器变体不需要再修改中央注册表。
+
+`trafficIngestor/single_csv/batch.py` 使用 `BATCH_BY_DOMAIN=True` 和 `BATCH_GROUP_SIZE=10`。调度器先按网站分组，再按 CSV 顺序切成 10 行一组；每个 Docker 任务只执行一组。成功后整组 10 行才会从输入 CSV 的事务日志中提交删除，任意页面失败则整组保留并重试。当前配置使用 `scripts/result/SiteBench_subpages_110site_120.csv`，输出目录为 `/netdisk/pcz/ablation_study/batch`。
 
 Chrome、Edge、Firefox 及其 Clash/ECH 变体统一使用 `trafficIngestor/traffic_capture_single_csv/action.py`。宿主 profile 通过 `TRAFFIC_ACTION_PROFILE` 传入浏览器模块路径，Clash 代理和诊断通过独立环境变量控制；运行前会把公共 action 同步到 `runtime/workspaces/` 中该 profile 的独立目录。Firefox ECH 任务还会检查密钥日志中的 `ECH_SECRET`、`ECH_CONFIG` 及后续 TLS 1.3 流量密钥标签，缺失时任务失败并在日志中输出各标签计数。
 
