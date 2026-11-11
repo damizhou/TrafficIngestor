@@ -167,6 +167,10 @@ class BaseTrafficIngestor(ABC):
         self._global_total_jobs = 0
         self._global_task_elapsed_total = 0.0
         self._resolved_container_count: Optional[int] = None
+        # Containers that were forcibly removed after an execution timeout.
+        # Their workers must stop pulling new tasks so retries cannot be sent
+        # to a container that no longer exists.
+        self._unusable_containers = set()
 
     @staticmethod
     def estimate_remaining_eta_seconds(remaining: int, per_min: float) -> float:
@@ -860,6 +864,37 @@ class BaseTrafficIngestor(ABC):
             self.log(f"FATAL: 删除容器失败: {name} -> {cp.stderr.strip()}")
             sys.exit(2)
         self.log(f"removed container: {name}")
+
+    def force_remove_task_container(self, name: str) -> bool:
+        """Best-effort remove a container whose docker exec timed out.
+
+        This path must not call ``remove_container``: that method treats a
+        removal error as fatal and exits the scheduler.  A timed-out exec can
+        already have removed the container, so an idempotent, bounded cleanup
+        is the appropriate behavior here.
+        """
+        try:
+            cp = subprocess.run(
+                ["docker", "rm", "-f", name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            self.log(f"WARN: 超时容器清理也超时: {name}")
+            return False
+        except OSError as exc:
+            self.log(f"WARN: 超时容器清理失败: {name} -> {exc}")
+            return False
+
+        if cp.returncode == 0:
+            self.log(f"超时容器已强制清理: {name}")
+            return True
+        detail = (cp.stderr or cp.stdout or "").strip()
+        self.log(f"WARN: 超时容器清理失败: {name} -> {detail or f'rc={cp.returncode}'}")
+        return False
 
     def create_container(
         self,
@@ -2267,6 +2302,8 @@ class BaseTrafficIngestor(ABC):
                     stats: Dict[str, Any], retry: int) -> None:
         """Worker 循环，失败任务放回队列由其他容器重试"""
         while not self._stop_tasks_event.is_set():
+            if container in self._unusable_containers:
+                return
             try:
                 wait_timeout = max(float(self.WORKER_QUEUE_WAIT_TIMEOUT), 0.0)
                 if getattr(self, "_retry_container_pool", ()):
@@ -2322,6 +2359,11 @@ class BaseTrafficIngestor(ABC):
                 except subprocess.TimeoutExpired:
                     err = f"timeout>{self.DOCKER_EXEC_TIMEOUT}s"
                     self.log(f"{container} -> timeout [{row_id}] {url}")
+                    # docker exec timeout only terminates the host-side
+                    # command.  Remove the container so a stuck browser
+                    # cannot survive into a retry or receive later tasks.
+                    self._unusable_containers.add(container)
+                    self.force_remove_task_container(container)
                     if attempt < retry:
                         task["_retry_count"] = attempt + 1
                         time.sleep(2)
@@ -2378,13 +2420,49 @@ class BaseTrafficIngestor(ABC):
             return int(q.unfinished_tasks)
 
     # ============== 信号处理 ==============
-    def _signal_handler(self, signum, _frame) -> None:
-        """信号处理函数"""
-        self.log(f"收到中断信号({signum})，立即退出。")
+    def _force_remove_runtime_containers(self) -> None:
+        """Best-effort stop containers after SIGINT/SIGTERM.
+
+        Signal handling must not depend on the tqdm/logger locks: a signal can
+        arrive while another thread owns those locks.  Containers are detached
+        Docker processes, so exiting the scheduler alone would otherwise leave
+        all active browser tasks running.
+        """
+        prefix = str(getattr(self, "CONTAINER_PREFIX", "") or "")
+        if not prefix:
+            return
         try:
-            sys.stdout.flush()
-            sys.stderr.flush()
+            listed = subprocess.run(
+                ["docker", "ps", "-aq", "--filter", f"name=^{prefix}[0-9]+$"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            container_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+            if container_ids:
+                subprocess.run(
+                    ["docker", "rm", "-f", *container_ids],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=60,
+                    check=False,
+                )
+        except Exception:
+            # The process is exiting; cleanup is best effort and must not block it.
+            pass
+
+    def _signal_handler(self, signum, _frame) -> None:
+        """Stop current containers and exit without taking logger locks."""
+        if getattr(self, "_signal_exit_started", False):
+            return
+        self._signal_exit_started = True
+        message = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 收到中断信号({signum})，清理容器后退出。\n"
+        try:
+            os.write(2, message.encode("utf-8", errors="replace"))
         finally:
+            self._force_remove_runtime_containers()
             os._exit(128 + signum)
 
     # ============== 抽象方法 ==============
@@ -2397,6 +2475,7 @@ class BaseTrafficIngestor(ABC):
     def run_once(self, names: List[str], jobs: List[Dict[str, str]]) -> Dict[str, Any]:
         """执行一批任务"""
         q: "queue.Queue[Dict[str, str]]" = queue.Queue()
+        self._unusable_containers.clear()
         for t in jobs:
             q.put(t)
 

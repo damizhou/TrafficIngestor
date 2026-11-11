@@ -85,11 +85,32 @@ class BatchSchedulerTests(unittest.TestCase):
     def test_groups_keep_ten_pages_and_repeated_rounds(self):
         self.assertEqual(len(self.jobs), 4)
         self.assertEqual([j["group_id"] for j in self.jobs],
-                         ["batch_0001", "batch_0002", "batch_0001", "batch_0002"])
+                         ["batch_0001", "batch_0001", "batch_0002", "batch_0002"])
+        self.assertEqual([j["domain"] for j in self.jobs],
+                         ["a.test", "b.test", "a.test", "b.test"])
+        self.assertEqual([j["urls"][0]["_csv_row_index"] for j in self.jobs],
+                         [0, 10, 20, 30])
         for job in self.jobs:
             self.assertEqual([r["row_id"] for r in job["urls"]], list(map(str, range(1, 11))))
             self.assertEqual({r["domain"] for r in job["urls"]}, {job["domain"]})
         self.assertEqual(self.ingestor.fetch_jobs(), [])
+
+    def test_domain_blocks_are_interleaved_by_round(self):
+        with self.csv.open(encoding="utf-8", newline="") as file:
+            rows = list(csv.DictReader(file))
+        rows.sort(key=lambda row: row["domain"])
+        with self.csv.open("w", encoding="utf-8", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=["id", "url", "domain"])
+            writer.writeheader()
+            writer.writerows(rows)
+        jobs = self.cls().fetch_jobs()
+        self.assertEqual(
+            [(job["domain"], job["group_id"]) for job in jobs],
+            [("a.test", "batch_0001"), ("b.test", "batch_0001"),
+             ("a.test", "batch_0002"), ("b.test", "batch_0002")],
+        )
+        self.assertEqual([job["urls"][0]["_csv_row_index"] for job in jobs],
+                         [0, 20, 10, 30])
 
     def test_success_archives_one_shared_pair_and_manifest_without_editing_csv(self):
         before = self.csv.read_bytes()
@@ -131,7 +152,7 @@ class BatchSchedulerTests(unittest.TestCase):
 
     def test_wrong_group_result_is_rejected(self):
         self.make_result(self.jobs[0])
-        self.assertFalse(self.ingestor.process_result(self.jobs[1], "test")[0])
+        self.assertFalse(self.ingestor.process_result(self.jobs[2], "test")[0])
 
     def test_task_list_transferred_by_file(self):
         task = dict(self.jobs[0], container="test", container_attempt=2,
@@ -251,6 +272,25 @@ class BatchSchedulerTests(unittest.TestCase):
         containers = self.run_container_retry_case(retry=1)
         self.assertNotEqual(containers[0], containers[1])
 
+    def test_exec_timeout_removes_container_and_retries_elsewhere(self):
+        attempts = []
+
+        def execute(task):
+            attempts.append(task["container"])
+            if len(attempts) == 1:
+                raise subprocess.TimeoutExpired(["docker", "exec"], 1)
+            return True, ""
+
+        self.ingestor.exec_once = execute
+        self.ingestor.force_remove_task_container = Mock(return_value=True)
+        self.ingestor._update_progress = Mock()
+        stats = self.ingestor.run_once(["c1", "c2"], [self.jobs[0]])
+
+        self.assertEqual(stats, {"ok": 1, "fail": 0, "errors": []})
+        self.assertEqual(len(attempts), 2)
+        self.assertNotEqual(attempts[0], attempts[1])
+        self.ingestor.force_remove_task_container.assert_called_once_with(attempts[0])
+
     def test_retry_reuses_containers_only_after_pool_is_exhausted(self):
         containers = self.run_container_retry_case(retry=4)
         self.assertEqual(len(set(containers[:3])), 3)
@@ -280,10 +320,10 @@ class BatchSchedulerTests(unittest.TestCase):
         remaining = self.cls().fetch_jobs()
         self.assertEqual(
             [(job["domain"], job["group_id"]) for job in remaining],
-            [("b.test", "batch_0001"), ("b.test", "batch_0002"), ("a.test", "batch_0001")],
+            [("b.test", "batch_0001"), ("a.test", "batch_0001"), ("b.test", "batch_0002")],
         )
         self.assertEqual(
-            [row["url"] for row in remaining[-1]["urls"]],
+            [row["url"] for row in remaining[1]["urls"]],
             [f"https://a.test/{index}" for index in range(1, 11)],
         )
         _, rows = ingestor._read_csv_records(self.csv)

@@ -19,12 +19,12 @@ CONFIG = {
     "BATCH_PAGE_GAP_SECONDS": 15,
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
     "BASE_DST": "/netdisk/pcz/ablation_study/batch",
-    "CONTAINER_COUNT": 120,
+    "CONTAINER_COUNT": 30,
     # 一组 10 页约 23.5 分钟，另留浏览器启动与收尾时间；失败组只重试一次。
     "DOCKER_EXEC_TIMEOUT": 6000,
     "RETRY": 1,
     "CSV_PATH": os.path.join(
-        PROJECT_ROOT, "scripts", "result", "SiteBench_subpages_110site_120.csv"
+        PROJECT_ROOT, "scripts", "result", "SiteBench_subpages_150batch.csv"
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"

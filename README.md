@@ -1,6 +1,6 @@
 # TrafficIngestor
 
-最后更新：2026-11-06 13:03:06
+最后更新：2026-11-06 15:05:37
 
 ## 项目简介
 TrafficIngestor 用于批量采集网页访问流量与页面内容。宿主机脚本负责管理 Docker 容器池、分发任务；容器内脚本负责驱动浏览器或 Scrapy 执行访问，并输出抓包文件、TLS 密钥日志、HTML、截图和文本内容。
@@ -125,7 +125,7 @@ python trafficIngestor/host_scheduler/single_csv_profiles.py trafficIngestor/sin
 - `BATCH_BY_DOMAIN`：打开按域名分组；只支持非 Clash 入口和 `ACTION_PROFILE = "tools/browsers/chrome.py"`。
 - `BATCH_GROUP_SIZE`：每组页数（默认 10）。每个域名在 CSV 中的行数必须是它的整数倍，重复轮次按出现顺序各自成组。
 - 每次执行记录 `container_attempt` 和 `container_history`（容器名称），随任务传入容器并写入结果 manifest。重试优先使用该任务尚未尝试的容器，容器池用完后允许复用；当前配置 `RETRY=1`，最多执行两次。
-- 同域名按 CSV 出现顺序分组，组内 10 页串行访问；跨组由多个容器并发执行，不保证全局开始或完成顺序。
+- 各网站第 1 组依次入队后，再安排各网站第 2 组，依此类推；同一轮按各组首行在 CSV 中的位置排序。容器持续并发领取任务，不等待整轮完成；组内 10 页串行访问。
 - `BATCH_PAGE_WAIT_SECONDS` / `BATCH_PAGE_GAP_SECONDS`：单页驻留时间与页间隔（默认 120 / 15 秒），也决定 `DOCKER_EXEC_TIMEOUT` 的下限。
 - `RETRY`：失败组的重试次数，每次重试都会重新访问整组页面。
 
@@ -158,7 +158,7 @@ python trafficIngestor/host_scheduler/single_csv_profiles.py trafficIngestor/sin
 
 `ACTION_PROFILE` 直接填写源码根目录下的浏览器 Python 文件路径，例如 `tools/browsers/chrome.py`、`tools/browsers/edge.py`、`tools/browsers/firefox.py` 或 `tools/browsers/firefox_ech.py`。入口会在启动前检查文件是否存在，并根据模块实际暴露的驱动函数识别浏览器类型；新增浏览器变体不需要再修改中央注册表。
 
-`trafficIngestor/single_csv/batch.py` 使用 `BATCH_BY_DOMAIN=True` 和 `BATCH_GROUP_SIZE=10`。调度器先按网站分组，再按 CSV 顺序切成 10 行一组；每个 Docker 任务只执行一组。成功后整组 10 行才会从输入 CSV 的事务日志中提交删除，任意页面失败则整组保留并重试。当前配置使用 `scripts/result/SiteBench_subpages_110site_120.csv`，输出目录为 `/netdisk/pcz/ablation_study/batch`。
+`trafficIngestor/single_csv/batch.py` 使用 `BATCH_BY_DOMAIN=True` 和 `BATCH_GROUP_SIZE=10`。调度器将不同网站的组按组号交错入队，同轮遵循 CSV 行序，不设置轮次等待；组内按 CSV 顺序连续访问 10 页，每个 Docker 任务只执行一组。成功后整组 10 行才会从输入 CSV 的事务日志中提交删除，任意页面失败则整组保留并重试。当前配置使用 `scripts/result/SiteBench_subpages_110site_120.csv`，输出目录为 `/netdisk/pcz/ablation_study/batch`。
 
 Chrome、Edge、Firefox 及其 Clash/ECH 变体统一使用 `trafficIngestor/traffic_capture_single_csv/action.py`。宿主 profile 通过 `TRAFFIC_ACTION_PROFILE` 传入浏览器模块路径，Clash 代理和诊断通过独立环境变量控制；运行前会把公共 action 同步到 `runtime/workspaces/` 中该 profile 的独立目录。Firefox ECH 任务还会检查密钥日志中的 `ECH_SECRET`、`ECH_CONFIG` 及后续 TLS 1.3 流量密钥标签，缺失时任务失败并在日志中输出各标签计数。
 

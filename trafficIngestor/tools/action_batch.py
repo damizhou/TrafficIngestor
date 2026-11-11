@@ -37,6 +37,9 @@ from tools.pcap_validation import validate_pcap_structure
 DEFAULT_PAGE_WAIT_SECONDS = 120
 DEFAULT_PAGE_GAP_SECONDS = 15
 DEFAULT_READY_STATE_TIMEOUT = 30
+# Bound a renderer stuck inside driver.get(); the host-side docker timeout is
+# intentionally much larger for a normal ten-page group.
+DEFAULT_PAGE_LOAD_TIMEOUT = 180
 # 正常结束后等待 TCP 挥手完成，失败组直接跳过以尽早重试。
 TCP_FINISH_WAIT_SECONDS = 60
 
@@ -61,6 +64,7 @@ class BatchAction(BaseAction):
     def visit_url(self, driver, url, wait_secs=DEFAULT_PAGE_WAIT_SECONDS,
                   ready_timeout=DEFAULT_READY_STATE_TIMEOUT):
         """访问页面并在驻留时间结束后校验页面状态。"""
+        driver.set_page_load_timeout(DEFAULT_PAGE_LOAD_TIMEOUT)
         driver.get(url)
         WebDriverWait(driver, ready_timeout).until(
             lambda d: d.execute_script("return document.readyState") == "complete"
@@ -236,7 +240,11 @@ class BatchAction(BaseAction):
                 kill_chrome_processes()
             finally:
                 if group_error or not visited_urls:
-                    self.logger.info("本组未成功，跳过等待 TCP 结束挥手完成")
+                    failure_reason = group_error or "no_page_visited"
+                    self.logger.info(
+                        f"本组未成功，domain={domain}，reason={failure_reason}，"
+                        "跳过等待 TCP 结束挥手完成"
+                    )
                 else:
                     self.logger.info(
                         f"等待TCP结束挥手完成，耗时{TCP_FINISH_WAIT_SECONDS}秒"

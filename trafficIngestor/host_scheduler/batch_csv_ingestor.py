@@ -55,6 +55,11 @@ class BatchCsvTaskSourceMixin(CsvTaskSourceMixin):
                     "domain": domain,
                     "urls": group_rows,
                 })
+        # 各网站每轮各取一组，轮内按 CSV 中该组首行的位置排列。
+        jobs.sort(key=lambda job: (
+            int(job["group_id"].removeprefix("batch_")),
+            job["urls"][0][self._CSV_ROW_INDEX_FIELD],
+        ))
         return jobs
 
     def get_default_action_source(self):
