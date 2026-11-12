@@ -1,6 +1,7 @@
 # 任务队列
+- [x] 已完成并验证：将 ech-supported-hostnames.txt 转为 scripts/result/mlj/ech-supported-hostnames_40.csv，163 个域名整表重复 40 轮、6520 条记录；表头、URL、id、轮次顺序及每域名次数回读核对通过 - 2026-11-11 10:02:52
 - [x] 已完成并验证：按远程 single 实际 PCAP 文件名中的 domain 与页面 id 逐条扣减 SiteBench_subpages_150single.csv；删除 businesstoday.in 1200 条和 makeuseof.com 1119 条，剩余 makeuseof.com 81 条，batch CSV 未改动；原 single CSV 已备份并完成逐页计数核对 - 2026-11-09 08:24:01`r`n`r`n- [x] 已完成并验证：仅按远程 batch 连续采集目录的实际 PCAP 次数筛选 SiteBench_subpages_150batch.csv 与 SiteBench_subpages_150single.csv，保留 90–119 次（含边界）的 businesstoday.in（119）和 makeuseof.com（114），两个 CSV 各保留 2400 行、2 个 domain；原文件已备份至 scripts/temp，回读与字节一致性检查通过 - 2026-11-09 08:20:15`r`n`r`n- [x] 已完成并验证：Docker exec 超时后强制清理当前容器并标记不可复用，batch 页面导航增加 180 秒 renderer 超时，重试改由其他容器接管；语法、32 项 batch 单元测试与 diff 检查通过 - 2026-11-09 07:59:18`r`n`r`n
-最后更新：2026-11-08 09:20:06
+最后更新：2026-11-12 15:44:04
 
 - [x] 已完成并验证：按远程 single/data 的实际 pcap 文件名（domain + 页面 id）逐页扣减本地 SiteBench_subpages_single_120remain.csv，每个 pcap 删除一条对应记录；以 2026-11-08 09:19:18 快照扣除 89834 行，剩余 85 个域名、542 个页面、40966 行，备份及逐页数量、原顺序和回读验证通过，未修改远程文件 - 2026-11-08 09:20:06
 
@@ -443,3 +444,5 @@
 - [x] 已完成并验证：将 HOST_CODE_PATH 子目录清理改为默认只在启动容器池后执行，批次结束保留失败现场日志和产物 - 2026-06-25 10:54:15
 - [x] 已完成并验证：放宽 Chrome 整页截图与首屏截图超时时间，降低长页面截图缺失失败 - 2026-06-25 11:05:13
 - [x] 已完成并验证：按长页面采集需求将 Chrome 整页截图超时提高到 300 秒、首屏截图超时提高到 120 秒 - 2026-06-25 11:08:36
+
+- [x] 已完成并验证：按用户最新要求将 get_url_list.py 容器数从 96 改为 32，保留采集结束后写入结果的逻辑；语法检查与目标文件 diff 检查通过，未启动采集 - 2026-11-12 15:44:04

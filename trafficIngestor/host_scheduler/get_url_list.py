@@ -60,7 +60,7 @@ BASE_NAME = "url_list_collector"
 # Docker 容器名前缀，格式为 "{用户名}_{BASE_NAME}"
 CONTAINER_PREFIX = f"{get_real_username()}_{BASE_NAME}"
 # Docker 容器池的容器数量
-CONTAINER_COUNT = 180
+CONTAINER_COUNT = 32
 # 宿主机上 url_list_collector 代码目录的绝对路径，会被挂载到容器内 /app
 HOST_CODE_PATH = os.path.join(_source_root, BASE_NAME)
 # 默认 Docker 镜像统一由 BaseTrafficIngestor.DOCKER_IMAGE 提供。
@@ -70,13 +70,13 @@ DOCKER_DNS: Optional[str] = None
 
 # 源数据 CSV 文件路径，包含待爬取的网站列表
 # 两列格式（id,domain）；原始 SiteBench.csv 为 7 列，第 2 列是 index，直接指过去会被误解析
-SOURCE_CSV = os.path.join(_project_root, "scripts", "result", "SiteBench_domains_merged.csv")
+SOURCE_CSV = os.path.join(_project_root, "scripts", "result", "yjn", "yjn_32_domains_seeds.csv")
 # 输出结果的根目录，每个域名会在此目录下创建子目录存放 url_list.csv
-OUTPUT_BASE_DIR = "/netdisk/pcz/ablation_study/subpages"
+OUTPUT_BASE_DIR = "/netdisk/yjn/website30/subpages"
 # 记录失败任务的 CSV 文件路径
 FAILED_CSV = os.path.join(_current_dir, "woza.csv")
 # 每个域名需要采集的目标 URL 数量
-TARGET_URLS_PER_DOMAIN = 10
+TARGET_URLS_PER_DOMAIN = 600
 # 结束后是否清理容器和临时子目录（默认关闭，便于排查）
 CLEANUP_ON_EXIT = False
 # 启动前是否清理上一轮遗留的临时文件
@@ -99,6 +99,8 @@ _failed_lock = threading.Lock()
 _pbar_lock = threading.Lock()
 # 全局域名→已采集URL集合的映射，用于去重和断点续传
 _domain_url_set: Dict[str, Set[str]] = {}
+# 已达到目标数量的域名；后续重复种子不再启动容器任务。
+_completed_domains: Set[str] = set()
 _pbar: Optional[tqdm] = None
 
 
@@ -397,8 +399,6 @@ def read_source_jobs() -> List[Dict[str, Any]]:
         return []
 
     jobs: List[Dict[str, Any]] = []
-    seen_domains: Set[str] = set()
-
     with p.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.reader(f)
         for line_no, row in enumerate(reader, start=1):
@@ -414,9 +414,8 @@ def read_source_jobs() -> List[Dict[str, Any]]:
 
             raw_site = second if second else first
             domain = normalize_domain(raw_site)
-            if not domain or domain in seen_domains:
+            if not domain:
                 continue
-            seen_domains.add(domain)
 
             row_id = first if first and first.lower() not in ("id", "rank", "index") else str(len(jobs) + 1)
             seed_url = normalize_seed_url(raw_site)
@@ -537,12 +536,17 @@ def process_result(task: Dict[str, Any], container: str) -> Tuple[bool, str]:
             append_rows(domain_output_csv(domain), OUTPUT_HEADER, new_rows)
 
         total = len(existing_set)
+        if total >= TARGET_URLS_PER_DOMAIN:
+            _completed_domains.add(domain)
 
     log(f"{domain}: 新增 {len(new_rows)} 条，累计 {total}/{TARGET_URLS_PER_DOMAIN}", container=container)
 
     if total >= TARGET_URLS_PER_DOMAIN:
         return True, ""
 
+    if total > 0:
+        log(f"{domain}: 本轮收集结束，保留实际 {total} 条 URL", container=container)
+        return True, ""
     err = result.get("error", "")
     if err:
         return False, f"insufficient urls: {total}/{TARGET_URLS_PER_DOMAIN}; visited={visited_count}; error={err}"
@@ -599,6 +603,13 @@ def worker_loop(container: str, q: "queue.Queue[Dict[str, Any]]", stats: Dict[st
         row_id = task.get("row_id", "")
         url = task.get("url", "")
         task["container"] = container
+        domain = normalize_domain(task.get("domain", ""))
+        with _output_lock:
+            completed = domain in _completed_domains
+        if completed:
+            log(f"{container} -> skip [{row_id}] {url}: {domain} 已达到 {TARGET_URLS_PER_DOMAIN} 条", container=container)
+            q.task_done()
+            continue
 
         attempt = int(task.get("_retry_count", 0) or 0)
         if "_start_time" not in task:
