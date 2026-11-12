@@ -34,9 +34,9 @@ from urllib.parse import urlparse
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SMALL_TOOLS_DIR = SCRIPT_DIR.parent
-DEFAULT_INPUT = SMALL_TOOLS_DIR / "origin" / "github.txt"
-DEFAULT_OUTPUT = SMALL_TOOLS_DIR / "result" / f"github.csv"
-DEFAULT_REPEAT_COUNT = 1
+DEFAULT_INPUT = SMALL_TOOLS_DIR / "origin" / "ww"/ "huffpost.com.csv"
+DEFAULT_OUTPUT = SMALL_TOOLS_DIR / "result" / "ww"/ f"huffpost.com.csv"
+DEFAULT_REPEAT_COUNT = 5
 FIELDNAMES = ["id", "url", "domain"]
 
 

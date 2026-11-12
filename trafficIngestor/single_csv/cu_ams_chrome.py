@@ -16,9 +16,9 @@ CONFIG = {
         "result",
         "cl_url_ams.csv",
     ),
-    "DOCKER_NETWORK": "traffic_ingestor_fixed_ip_ams_net",
-    "DOCKER_NETWORK_SUBNET_PREFIX": 22,
-    "DOCKER_NETWORK_GATEWAY": "172.22.0.1",
-    "CONTAINER_IP_START": "172.22.0.2",
+    "DOCKER_NETWORK": "traffic_ingestor_geo_ams_net",
+    "DOCKER_NETWORK_SUBNET_PREFIX": 24,
+    "DOCKER_NETWORK_GATEWAY": "172.18.3.1",
+    "CONTAINER_IP_START": "172.18.3.2",
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"

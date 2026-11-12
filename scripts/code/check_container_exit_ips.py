@@ -35,7 +35,7 @@ from host_scheduler import single_csv_profiles as profile_runner
 from host_scheduler.csv_ingestor_common import CsvIngestorProfile
 
 
-PROFILE_PATH = PROJECT_ROOT / "trafficIngestor" / "single_csv" / "geo_sgp_chrome.py"
+PROFILE_PATH = PROJECT_ROOT / "trafficIngestor" / "single_csv" / "fixed_ip_rsia.py"
 CONTAINER_COUNT = 2
 MOUNT_CODE_IN_CONTAINERS = False
 DISABLE_OFFLOAD_DURING_POOL_PREPARE = False

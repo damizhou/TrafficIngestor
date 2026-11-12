@@ -7,18 +7,19 @@ from single_csv._common import PROJECT_ROOT
 
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
-    "SHARED_FIXED_IP_NETWORK": "traffic_ingestor_fixed_ip_rsia_net",
-    "CONTAINER_COUNT": 2 * 40,
-    "BASE_DST": "/netdisk2/ww/wiki/260514/chrome/sgp",
-    "DOCKER_NETWORK": "traffic_ingestor_fixed_ip_rsia_net",
-    "DOCKER_NETWORK_SUBNET_PREFIX": 23,
-    "DOCKER_NETWORK_GATEWAY": "172.18.2.1",
-    "CONTAINER_IP_START": "172.18.2.2",
+    "SHARED_FIXED_IP_NETWORK": "traffic_ingestor_geo_sgp_net",
+    "CONTAINER_COUNT": 20,
+    "BASE_DST": "/netdisk2/ww/wiki/20261112/chrome/sgp",
+    "DOCKER_NETWORK": "traffic_ingestor_geo_sgp_net",
+    "DOCKER_NETWORK_SUBNET_PREFIX": 24,
+    "DOCKER_NETWORK_GATEWAY": "172.18.0.1",
+    "CONTAINER_IP_START": "172.18.0.2",
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",
         "result",
-        "wiki_edge.csv",
+        "ww",
+        "wiki20x3.csv",
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"

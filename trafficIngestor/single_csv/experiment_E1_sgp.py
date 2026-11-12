@@ -7,14 +7,14 @@ from single_csv._common import PROJECT_ROOT
 
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
-    "SHARED_FIXED_IP_NETWORK": "traffic_ingestor_experiment_e1_sgp_net",
+    "SHARED_FIXED_IP_NETWORK": "traffic_ingestor_geo_sgp_net",
     "DOCKER_IMAGE": "chuanzhoupan/trace_spider:250912",
     "BASE_DST": "/netdisk/pcz/experiment_E1_sgp",
-    "CONTAINER_COUNT": 900,
-    "DOCKER_NETWORK": "traffic_ingestor_experiment_e1_sgp_net",
-    "DOCKER_NETWORK_SUBNET_PREFIX": 22,
-    "DOCKER_NETWORK_GATEWAY": "172.18.4.1",
-    "CONTAINER_IP_START": "172.18.4.2",
+    "CONTAINER_COUNT": 253,
+    "DOCKER_NETWORK": "traffic_ingestor_geo_sgp_net",
+    "DOCKER_NETWORK_SUBNET_PREFIX": 24,
+    "DOCKER_NETWORK_GATEWAY": "172.18.0.1",
+    "CONTAINER_IP_START": "172.18.0.2",
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",

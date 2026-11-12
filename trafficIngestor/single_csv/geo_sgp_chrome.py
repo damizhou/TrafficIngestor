@@ -16,9 +16,9 @@ CONFIG = {
         "result",
         "top3500_sgp_50_yjn.csv",
     ),
-    "DOCKER_NETWORK": "traffic_ingestor_geo_spg_net",
+    "DOCKER_NETWORK": "traffic_ingestor_geo_sgp_net",
     "DOCKER_NETWORK_SUBNET_PREFIX": 24,
-    "DOCKER_NETWORK_GATEWAY": "172.18.1.1",
-    "CONTAINER_IP_START": "172.18.1.2",
+    "DOCKER_NETWORK_GATEWAY": "172.18.0.1",
+    "CONTAINER_IP_START": "172.18.0.2",
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"
