@@ -87,6 +87,7 @@ class BatchCsvTaskSourceMixin(CsvTaskSourceMixin):
     def exec_once(self, task):
         container = task["container"]
         self._wait_before_first_exec(container)
+        self.mark_egress_started(task)
         if self._browser_label:
             task["browser_label"] = self._browser_label
         payload = self.build_batch_payload(task)

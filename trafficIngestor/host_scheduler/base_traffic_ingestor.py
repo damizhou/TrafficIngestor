@@ -30,6 +30,12 @@ from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Any
 from concurrent.futures import ThreadPoolExecutor
 
+from host_scheduler.egress_cooldown import (
+    CooldownTaskQueue,
+    EgressCooldownGate,
+    describe_container_ips,
+)
+
 try:
     from tqdm import tqdm
 except ModuleNotFoundError:
@@ -135,6 +141,12 @@ class BaseTrafficIngestor(ABC):
     DELETE_CSV_RECORD_ON_SUCCESS: bool = True
     CLEANUP_WAIT_SECONDS_ON_INCOMPLETE: float = 60.0
     WORKER_QUEUE_WAIT_TIMEOUT: float = 0.0
+    # 同一出口节点访问同一网站（CSV domain 列）的最小启动间隔（秒）；0 表示关闭。
+    SITE_COOLDOWN_SECONDS: float = 180.0
+    # 默认 bridge 网络的出口节点数；容器 IP 最后 8 位 % 节点数 相同的容器共用同一出口。
+    DEFAULT_BRIDGE_OUTPUT_NODES: int = 15
+    # 自建网络（设置了 DOCKER_NETWORK）的出口节点数；开启冷却时必须在配置中给出。
+    DOCKER_NETWORK_OUTPUT_NODES: Optional[int] = None
 
     def __init__(self):
         self._runtime_entry_script = self.get_entry_script_path()
@@ -171,6 +183,8 @@ class BaseTrafficIngestor(ABC):
         # Their workers must stop pulling new tasks so retries cannot be sent
         # to a container that no longer exists.
         self._unusable_containers = set()
+        # 出口节点 × 网站 冷却门控；容器池准备好后创建，SITE_COOLDOWN_SECONDS=0 时为 None
+        self._egress_gate: Optional[EgressCooldownGate] = None
 
     @staticmethod
     def estimate_remaining_eta_seconds(remaining: int, per_min: float) -> float:
@@ -2061,6 +2075,7 @@ class BaseTrafficIngestor(ABC):
         container = task["container"]
         self._wait_before_first_exec(container)
         self._wait_before_same_id_exec(task)
+        self.mark_egress_started(task)
         if self._browser_label:
             task["browser_label"] = self._browser_label
         payload = json.dumps(task, ensure_ascii=False)
@@ -2298,6 +2313,66 @@ class BaseTrafficIngestor(ABC):
             stats["errors"].append((task, err))
         self._update_progress(ok=False, task_elapsed=task_elapsed)
 
+    # ============== 出口节点 × 网站 冷却 ==============
+    def get_output_node_count(self) -> int:
+        """默认 bridge 使用 DEFAULT_BRIDGE_OUTPUT_NODES；自建网络必须配置 DOCKER_NETWORK_OUTPUT_NODES。"""
+        if self.get_target_docker_network() == "bridge":
+            return int(self.DEFAULT_BRIDGE_OUTPUT_NODES)
+        nodes = self.DOCKER_NETWORK_OUTPUT_NODES
+        if isinstance(nodes, bool) or not isinstance(nodes, int) or nodes <= 0:
+            raise FatalIngestorError(
+                f"DOCKER_NETWORK={self.DOCKER_NETWORK} 开启了站点冷却（SITE_COOLDOWN_SECONDS="
+                f"{self.SITE_COOLDOWN_SECONDS}），必须在配置中给出正整数 DOCKER_NETWORK_OUTPUT_NODES，"
+                f"当前为 {nodes!r}"
+            )
+        return nodes
+
+    def cooldown_enabled(self) -> bool:
+        if hasattr(self, "CLASH_HOST_PATH"):
+            # Clash 采集器的出口由每个容器分配的 Clash 节点决定，按 IP 分组不成立，暂不支持冷却
+            return False
+        return float(self.SITE_COOLDOWN_SECONDS or 0) > 0
+
+    def validate_egress_cooldown_config(self) -> None:
+        """在创建容器之前校验，配置缺失时尽早失败。"""
+        value = self.SITE_COOLDOWN_SECONDS
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            raise FatalIngestorError(f"SITE_COOLDOWN_SECONDS 必须是非负数（秒），当前为 {value!r}")
+        if self.cooldown_enabled():
+            self.get_output_node_count()
+
+    def setup_egress_cooldown(self, names: List[str]) -> None:
+        """读取容器实际 IP，按出口节点分组，建立冷却门控。"""
+        if not self.cooldown_enabled():
+            self._egress_gate = None
+            reason = "Clash 采集器暂不支持" if hasattr(self, "CLASH_HOST_PATH") else "SITE_COOLDOWN_SECONDS=0"
+            self.log(f"站点冷却已关闭（{reason}）")
+            return
+        node_count = self.get_output_node_count()
+        ips: Dict[str, str] = {}
+        for name in names:
+            ip = self.get_container_ipv4(name)
+            if not ip:
+                raise FatalIngestorError(f"读取容器 IP 失败，无法计算出口分组: {name}")
+            ips[name] = ip
+        lines, groups = describe_container_ips(ips, node_count)
+        for line in lines:
+            self.log(line)
+        self._egress_gate = EgressCooldownGate(self.SITE_COOLDOWN_SECONDS, groups, self.log)
+        self.log(f"站点冷却已开启: 同一出口节点访问同一网站间隔 >= {self.SITE_COOLDOWN_SECONDS}s，"
+                 f"出口节点数={node_count}，网络={self.get_target_docker_network()}")
+
+    def create_task_queue(self) -> "queue.Queue[Dict[str, str]]":
+        """开启冷却时返回按 (出口组, 网站) 挑选任务的队列，否则返回普通 FIFO 队列。"""
+        if self._egress_gate is not None:
+            return CooldownTaskQueue(self._egress_gate)
+        return queue.Queue()
+
+    def mark_egress_started(self, task: Dict[str, str]) -> None:
+        """docker exec 真正启动前调用，按实际启动时间顺延冷却。"""
+        if self._egress_gate is not None:
+            self._egress_gate.mark_started(task)
+
     def worker_loop(self, container: str, q: "queue.Queue[Dict[str, str]]",
                     stats: Dict[str, Any], retry: int) -> None:
         """Worker 循环，失败任务放回队列由其他容器重试"""
@@ -2309,12 +2384,18 @@ class BaseTrafficIngestor(ABC):
                 if getattr(self, "_retry_container_pool", ()):
                     # 保留空闲 worker，等待在途任务失败后交给其它容器。
                     wait_timeout = max(wait_timeout, 0.1)
-                if wait_timeout > 0:
+                if isinstance(q, CooldownTaskQueue):
+                    # 冷却模式：只取本容器出口组可执行的任务；等待上限 1 秒避免空转扫描
+                    task = q.get_for_container(container, timeout=max(wait_timeout, 1.0))
+                elif wait_timeout > 0:
                     task = q.get(timeout=wait_timeout)
                 else:
                     task = q.get_nowait()
             except queue.Empty:
                 if self.should_wait_for_more_tasks():
+                    continue
+                if isinstance(q, CooldownTaskQueue) and self.get_unfinished_task_count(q) > 0:
+                    # 队列里的任务可能都在冷却中，或在途任务失败后还会放回
                     continue
                 if (
                     getattr(self, "_retry_container_pool", ())
@@ -2331,7 +2412,8 @@ class BaseTrafficIngestor(ABC):
                 container_history = task.setdefault("_container_history", [])
                 retry_pool = getattr(self, "_retry_container_pool", ())
                 if (
-                    container_history
+                    not isinstance(q, CooldownTaskQueue)
+                    and container_history
                     and container in container_history
                     and any(name not in container_history for name in retry_pool)
                 ):
@@ -2474,7 +2556,7 @@ class BaseTrafficIngestor(ABC):
     # ============== 主运行逻辑 ==============
     def run_once(self, names: List[str], jobs: List[Dict[str, str]]) -> Dict[str, Any]:
         """执行一批任务"""
-        q: "queue.Queue[Dict[str, str]]" = queue.Queue()
+        q: "queue.Queue[Dict[str, str]]" = self.create_task_queue()
         self._unusable_containers.clear()
         for t in jobs:
             q.put(t)
@@ -2523,6 +2605,7 @@ class BaseTrafficIngestor(ABC):
 
         # 初始化（子类可覆盖 setup 方法）
         self.setup()
+        self.validate_egress_cooldown_config()
         self.ensure_base_dst_writable()
         self._copied_task_csv_path = self.copy_task_csv_to_base_dst() or ""
         self.initialize_execution_task_log()
@@ -2573,6 +2656,7 @@ class BaseTrafficIngestor(ABC):
                     else:
                         names = self.prepare_existing_container_pool()
                     self._runtime_prepared = True
+                    self.setup_egress_cooldown(names)
 
                 batch_num += 1
                 self.log(f"===== 批次 {batch_num}: 共 {len(jobs)} 条任务 =====")

@@ -16,3 +16,4 @@ scripts/result/
 scripts/origin/
 scripts/csvs/
 temp/
+venv/

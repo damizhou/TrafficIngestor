@@ -354,7 +354,7 @@ class MultiCsvTrafficIngestor(BaseTrafficIngestor):
         names: List[str],
         jobs: List[Dict[str, str]],
     ) -> Dict[str, Any]:
-        task_queue: "queue.Queue[Dict[str, str]]" = queue.Queue()
+        task_queue: "queue.Queue[Dict[str, str]]" = self.create_task_queue()
         self._task_queue = task_queue
         self._initial_jobs = []
         self._global_total_jobs = len(jobs)

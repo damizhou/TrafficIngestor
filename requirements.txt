@@ -1,0 +1,5 @@
+# 宿主机调度层依赖（容器内依赖由 Docker 镜像提供）
+tqdm
+SQLAlchemy
+PyMySQL
+openpyxl

@@ -9,7 +9,7 @@
 `trafficIngestor/` 是源码根目录：`trafficIngestor/host_scheduler/` 和 `trafficIngestor/trafficIngestor_clash/` 保存宿主机调度脚本，`trafficIngestor/traffic_capture_single_csv/` 与 `trafficIngestor/traffic_capture_single_db/` 保存容器执行入口，`trafficIngestor/tools/browsers/` 保存浏览器实现，`trafficIngestor/tools/` 其余文件保存抓包、日志和 Action 公共模块，`trafficIngestor/url_list_collector/` 保存 Scrapy URL 收集项目，`trafficIngestor/urlFind/` 保存按站点调度的 URL 发现流程（总调度管理站点状态、容器池和“出口组 × 站点”冷却，容器内 `urlFind/worker/visit_page.py` 每次只访问一个页面；参数全部集中在 `urlFind/config.py`）。非 Clash 单 CSV 配置位于 `trafficIngestor/single_csv/`，通过 `python trafficIngestor/host_scheduler/single_csv_profiles.py <配置文件路径>` 加载；Clash 模板和节点配置位于 `configs/clash/`。输入 CSV 和数据维护脚本集中在 `scripts/`，运行工作区统一写入 `runtime/`。
 
 ## 构建、测试与开发命令
-优先先做语法校验，再跑最小范围验证：
+宿主机依赖见根目录 `requirements.txt`，统一使用仓库内虚拟环境：`python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt`（`venv/` 不入库）。优先先做语法校验，再跑最小范围验证：
 
 ```powershell
 python -m py_compile trafficIngestor\tools\base_action.py trafficIngestor\tools\browsers\firefox.py trafficIngestor\traffic_capture_single_csv\action.py
