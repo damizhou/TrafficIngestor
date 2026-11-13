@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections import Counter, OrderedDict, deque
 from dataclasses import dataclass, field
@@ -124,6 +125,7 @@ class SiteCrawler:
         exclude_keywords: List[str],
         tracking_params: List[str],
         non_retryable_rejections: Iterable[str] = (),
+        skip_url_patterns: Iterable[str] = (),
     ):
         self.key = key
         self.seed_url = seed_url
@@ -138,6 +140,7 @@ class SiteCrawler:
         self.exclude_keywords = list(exclude_keywords)
         self.tracking_params = list(tracking_params)
         self.non_retryable_rejections = tuple(non_retryable_rejections)
+        self.skip_url_patterns = [re.compile(p) for p in skip_url_patterns]
 
         self.status = STATUS_SEEDING
         self.finish_reason = ""
@@ -182,7 +185,9 @@ class SiteCrawler:
         return normalize_url_key(url, self.tracking_params)
 
     def is_excluded(self, url: str) -> bool:
-        return any(keyword in url for keyword in self.exclude_keywords)
+        if any(keyword in url for keyword in self.exclude_keywords):
+            return True
+        return any(pattern.search(url) for pattern in self.skip_url_patterns)
 
     @property
     def finished(self) -> bool:
@@ -463,15 +468,22 @@ class SiteCrawler:
             self.stats.update(state.get("stats", {}))
             self.seen.update(state.get("seen", []))
             self.expanded.update(state.get("expanded", []))
+            # 恢复队列时按当前排除规则过滤：规则更新后旧队列里的匹配项不再访问
             for item in state.get("frontier", []):
                 entry = self._unpack(item)
                 if entry.key:
                     self.seen.add(entry.key)
+                    if self.is_excluded(entry.url):
+                        self.stats["dropped:excluded_on_restore"] += 1
+                        continue
                     self._push_frontier(entry)
             for item in state.get("retry", []):
                 entry = self._unpack(item)
                 if entry.key:
                     self.seen.add(entry.key)
+                    if self.is_excluded(entry.url):
+                        self.stats["dropped:excluded_on_restore"] += 1
+                        continue
                     self._push_retry(entry)
             # 上次已结束（partial/failed）的站点重新给一份访问预算；未结束的接着用
             if state.get("status") not in FINISHED_STATUSES:

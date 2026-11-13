@@ -79,6 +79,13 @@ def build_sites(store: StateStore, log) -> Tuple[List[SiteCrawler], Dict[str, Si
     exclude = load_exclude_keywords()
     sites: List[SiteCrawler] = []
     outputs: Dict[str, SiteOutput] = {}
+    if config.ONLY_SITES is not None:
+        wanted = set(config.ONLY_SITES)
+        missing = wanted - {key for key, _ in entries}
+        if missing:
+            log(f"WARN: ONLY_SITES 中的站点不在输入 CSV 中: {sorted(missing)}")
+        entries = [(key, seed) for key, seed in entries if key in wanted]
+        log(f"只运行 ONLY_SITES 指定的 {len(entries)} 个站点")
     for key, seed in entries:
         site = SiteCrawler(
             key, seed, resolver,
@@ -92,6 +99,7 @@ def build_sites(store: StateStore, log) -> Tuple[List[SiteCrawler], Dict[str, Si
             exclude_keywords=exclude,
             tracking_params=config.TRACKING_QUERY_PARAMS,
             non_retryable_rejections=config.NON_RETRYABLE_REJECTIONS,
+            skip_url_patterns=config.SKIP_URL_PATTERNS,
         )
         output = SiteOutput(config.OUTPUT_BASE_DIR, key)
         existing = output.load_urls()
