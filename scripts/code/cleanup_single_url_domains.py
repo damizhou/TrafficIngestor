@@ -112,7 +112,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--base-dir",
         default=DEFAULT_BASE_DIR,
-        help=f"Root output directory from get_url_list.py (default: {DEFAULT_BASE_DIR})",
+        help=f"Root output directory from urlFind/url_find.py (default: {DEFAULT_BASE_DIR})",
     )
     parser.add_argument(
         "--url-list-name",

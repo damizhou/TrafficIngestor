@@ -29,8 +29,6 @@ from urlFind.site import SiteCrawler, SiteResolver  # noqa: E402
 from urlFind.storage import RunRecorder, SiteOutput, StateStore  # noqa: E402
 from urlFind.visit import run_visit  # noqa: E402
 
-EXCLUDE_KEYWORDS_FILE = os.path.join(config.SOURCE_ROOT, "url_list_collector", "exclude_keywords")
-
 
 def parse_site(raw: str) -> Tuple[str, str]:
     """输入的 domain（或 URL）→ (站点 key, 种子 URL)。key 为小写主机名。"""
@@ -64,19 +62,10 @@ def read_sites(path: str) -> List[Tuple[str, str]]:
     return list(sites.items())
 
 
-def load_exclude_keywords() -> List[str]:
-    if config.EXCLUDE_KEYWORDS is not None:
-        return [k for k in config.EXCLUDE_KEYWORDS if k]
-    if not os.path.isfile(EXCLUDE_KEYWORDS_FILE):
-        return []
-    with open(EXCLUDE_KEYWORDS_FILE, "r", encoding="utf-8") as f:
-        return [line.strip() for line in f if line.strip()]
-
-
 def build_sites(store: StateStore, log) -> Tuple[List[SiteCrawler], Dict[str, SiteOutput]]:
     entries = read_sites(config.SOURCE_CSV)
     resolver = SiteResolver(key for key, _ in entries)
-    exclude = load_exclude_keywords()
+    exclude = [k for k in config.EXCLUDE_KEYWORDS if k]
     sites: List[SiteCrawler] = []
     outputs: Dict[str, SiteOutput] = {}
     if config.ONLY_SITES is not None:

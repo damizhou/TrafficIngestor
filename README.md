@@ -3,12 +3,12 @@
 最后更新：2026-11-12 17:32:56
 
 ## 项目简介
-TrafficIngestor 用于批量采集网页访问流量与页面内容。宿主机脚本负责管理 Docker 容器池、分发任务；容器内脚本负责驱动浏览器或 Scrapy 执行访问，并输出抓包文件、TLS 密钥日志、HTML、截图和文本内容。
+TrafficIngestor 用于批量采集网页访问流量与页面内容。宿主机脚本负责管理 Docker 容器池、分发任务；容器内脚本负责驱动浏览器执行访问，并输出抓包文件、TLS 密钥日志、HTML、截图和文本内容。
 
 当前仓库主要覆盖两类任务：
 
 - 流量采集：使用 Chrome、Edge、Firefox 访问目标 URL，生成 `pcap`、`ssl_key.log`、页面源码和截图。
-- URL 收集：使用 Scrapy 从站点主页采集候选子链接，供后续流量采集使用。
+- URL 收集：urlFind 按站点调度，每次在容器内用 Chrome 访问一个页面并校验，采集站点子页面 URL，供后续流量采集使用。
 
 ## 核心结构
 ```text
@@ -22,7 +22,7 @@ trafficIngestor/traffic_capture_single_db/
                                     数据库容器执行入口
 trafficIngestor/multi_csv_traffic_ingestor/
                                     多 CSV 调度入口
-trafficIngestor/url_list_collector/ Scrapy URL 收集子项目
+trafficIngestor/urlFind/           URL 发现流程（参数集中在 urlFind/config.py）
 trafficIngestor/tools/              公共抓包、日志与 Action 基类
 trafficIngestor/tools/browsers/     Chrome、Edge 与 Firefox 浏览器实现
 trafficIngestor/single_csv/         HTTPS 与 Clash 单 CSV 独立配置目录
@@ -109,7 +109,7 @@ python trafficIngestor/host_scheduler_clash/single_csv_profiles.py trafficIngest
   SiteBench 分组采集：读取 `scripts/result/SiteBench_subpages_110site_120.csv`，同一网站每 10 个页面组成一组，组内连续访问并共用一个 pcap；10 个页面全部成功且共享产物有效才算成功，失败整组重试。
 - `python trafficIngestor/host_scheduler/traffic_capture_single_db.py`
   从数据库读取新闻 URL 批量采集
-- `python trafficIngestor/host_scheduler/get_url_list.py`
+- `python trafficIngestor/urlFind/url_find.py`
   批量采集站点子页面 URL
 
 #### 按网站分组采集（10 页共享一份抓包）

@@ -81,6 +81,8 @@ VIEWPORT_SCREENSHOT_TIMEOUT_SECS = 120
 CHROME_VIEWPORT_WIDTH = 3840
 CHROME_VIEWPORT_HEIGHT = 2160
 CHROME_DEVICE_SCALE_FACTOR = 1.0
+# 每次创建驱动时的任务临时目录前缀（profile、TMPDIR 都在其中，quit 时整体删除）。
+CHROME_TASK_TMP_PREFIX = "trafficIngestor-ingestor-chrome-task-"
 
 # 页面加载完成后的采集窗口（秒）：期间保持页面活动，用于抓全流量与视频。
 POST_LOAD_CAPTURE_WAIT_SECS = 60
@@ -272,7 +274,7 @@ def _install_chrome_managed_policy(policy, logger=None):
 
 
 def _create_chrome_task_tmp_dir():
-    return tempfile.mkdtemp(prefix="trafficIngestor-ingestor-chrome-task-")
+    return tempfile.mkdtemp(prefix=CHROME_TASK_TMP_PREFIX)
 
 
 def _create_chrome_profile_dir(local_state, logger=None, task_tmp_dir=None):

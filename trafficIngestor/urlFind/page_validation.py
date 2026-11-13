@@ -5,7 +5,6 @@ import re
 from urllib.parse import unquote, urlsplit
 
 
-PAGE_SETTLE_SECONDS = 15
 HTML_MIME_TYPES = {"text/html", "application/xhtml+xml"}
 RESOURCE_SUFFIXES = {
     ".js", ".mjs", ".css", ".map", ".json", ".xml", ".txt", ".csv",

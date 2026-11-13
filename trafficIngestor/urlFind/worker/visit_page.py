@@ -8,6 +8,7 @@
 
 payload: {"visit_id", "url", "page_load_timeout", "settle_seconds", "max_links"}
 
+浏览器复用 tools/browsers/chrome.py（与抓包流程同一套 Chrome 配置），页面校验使用 urlFind/page_validation.py。
 容器同一时刻只执行一个访问（由宿主机调度保证），所以开始前可以安全清理残留 Chrome。
 本文件运行在容器的 Python 3.9 中。
 """
@@ -20,6 +21,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 # /app/urlFind/worker/visit_page.py -> /app
@@ -33,8 +35,6 @@ from urlFind.protocol import (  # noqa: E402
 
 # 一次 JS 调用取出所有 <a href>（浏览器已解析为绝对地址）
 LINKS_SCRIPT = "return [...document.querySelectorAll('a[href]')].map(a => a.href);"
-# Selenium/Chrome 在 /tmp 下留下的临时 profile 目录
-CHROME_TMP_PATTERNS = ("/tmp/.com.google.Chrome.*", "/tmp/.org.chromium.Chromium.*", "/tmp/scoped_dir*")
 
 
 def log(msg: str) -> None:
@@ -43,16 +43,17 @@ def log(msg: str) -> None:
 
 
 def kill_browsers() -> None:
-    # 按进程名精确匹配；不用 -f，避免命中命令行里带 "chrome" 的本进程（payload 含 URL）。
+    # 按进程名精确匹配；不用 tools 的 kill_chrome_processes（pkill -f），
+    # 避免命中命令行里带 "chromedriver"/"google-chrome" 的本进程（payload 含 URL）。
     for name in ("chromedriver", "google-chrome", "chrome"):
         subprocess.run(["pkill", "-9", "-x", name], stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, check=False)
 
 
-def clean_chrome_tmp() -> None:
-    for pattern in CHROME_TMP_PATTERNS:
-        for path in glob.glob(pattern):
-            shutil.rmtree(path, ignore_errors=True)
+def clean_stale_chrome_tmp(prefix: str) -> None:
+    """正常结束时 browser.quit() 会删除本次任务临时目录；这里只清理上次访问被强杀后留下的目录。"""
+    for path in glob.glob(os.path.join(tempfile.gettempdir(), prefix + "*")):
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def emit(result: dict) -> None:
@@ -78,10 +79,8 @@ def extract_page_links(browser, max_links: int, is_page_url) -> list:
 
 def visit(payload: dict) -> dict:
     from selenium.common.exceptions import TimeoutException, WebDriverException
-    from url_list_collector.utils.chrome import create_chrome_driver
-    from url_list_collector.utils.page_validation import (
-        PageRejected, is_page_url, read_validated_page,
-    )
+    from tools.browsers.chrome import CHROME_TASK_TMP_PREFIX, create_chrome_driver
+    from urlFind.page_validation import PageRejected, is_page_url, read_validated_page
 
     started = time.time()
     url = str(payload.get("url", "")).strip()
@@ -97,10 +96,10 @@ def visit(payload: dict) -> dict:
     }
 
     kill_browsers()
-    clean_chrome_tmp()
+    clean_stale_chrome_tmp(CHROME_TASK_TMP_PREFIX)
     browser = None
     try:
-        browser = create_chrome_driver()
+        browser = create_chrome_driver(enable_ssl_key_log=False)
         browser.set_page_load_timeout(int(payload.get("page_load_timeout", 60)))
         browser.get_log("performance")  # 清空启动阶段的事件
         try:
@@ -135,19 +134,18 @@ def visit(payload: dict) -> dict:
     finally:
         if browser is not None:
             try:
-                browser.quit()
+                browser.quit()  # tools 版 quit 同时删除任务临时目录和崩溃报告
             except Exception:
                 pass
         kill_browsers()
-        clean_chrome_tmp()
         result["elapsed"] = round(time.time() - started, 2)
 
 
 def selftest() -> int:
     """检查容器内依赖是否齐全，不启动浏览器。"""
     from selenium import webdriver  # noqa: F401
-    from url_list_collector.utils.chrome import create_chrome_driver  # noqa: F401
-    from url_list_collector.utils.page_validation import read_validated_page  # noqa: F401
+    from tools.browsers.chrome import create_chrome_driver  # noqa: F401
+    from urlFind.page_validation import read_validated_page  # noqa: F401
     emit({"selftest": "ok", "python": sys.version.split()[0]})
     return 0
 

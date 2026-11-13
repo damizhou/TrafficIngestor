@@ -35,7 +35,7 @@ class UrlFindPool(BaseTrafficIngestor):
     """只使用基类的容器池、网络和日志能力，不使用其 CSV 任务调度。"""
 
     BASE_NAME = "url_find"
-    # 源码根目录 trafficIngestor/ 挂载为 /app，容器内可直接复用 url_list_collector/utils 与 urlFind。
+    # 源码根目录 trafficIngestor/ 挂载为 /app，容器内可直接复用 tools/browsers 与 urlFind。
     HOST_CODE_PATH = config.SOURCE_ROOT
     MOUNT_CODE_IN_CONTAINERS = True
     DISABLE_OFFLOAD_DURING_POOL_PREPARE = False  # URL 发现不抓包，不需要关闭网卡 offload

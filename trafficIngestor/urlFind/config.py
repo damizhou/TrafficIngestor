@@ -25,7 +25,7 @@ RUN_NAME: str = "yjn_32"
 RUNTIME_DIR: str = os.path.join(PROJECT_ROOT, "runtime", "url_find", RUN_NAME)
 # 只运行这些站点（站点 key 与输入 CSV 一致）；为 None 时运行 CSV 中全部站点。
 # 未选中的站点仍参与站点归属判断，属于它们的链接不会进入选中站点的队列。
-ONLY_SITES: Optional[List[str]] = None
+ONLY_SITES: Optional[List[str]] = ["wikipedia.org", "vmware.com", "worldbank.org", "mobile-tracker-free.com"]
 
 # ============== 采集目标 ==============
 # 每个站点需要采集的 URL 数（只统计实际打开并校验通过的页面）。
@@ -48,8 +48,8 @@ MAX_URLS_PER_BUCKET: int = 0
 MAX_FRONTIER_PER_SITE: int = 50000
 # 单个页面最多返回多少条链接。
 MAX_LINKS_PER_PAGE: int = 2000
-# URL 中包含任一关键字则不采集；为 None 时读取 url_list_collector/exclude_keywords（不存在则为空）。
-EXCLUDE_KEYWORDS: Optional[List[str]] = None
+# URL 中包含任一关键字则不采集、不入队。
+EXCLUDE_KEYWORDS: List[str] = []
 # URL 匹配任一正则（re.search）则不采集、不入队；从状态快照恢复时也会清理队列中的匹配项。
 SKIP_URL_PATTERNS: List[str] = [
     r"[?&]returnto=",      # 登录/注册页（MediaWiki 等），通常还会跳转到站外认证域名
@@ -64,7 +64,7 @@ TRACKING_QUERY_PARAMS: List[str] = [
 # 默认 bridge 网络的出口节点数；容器 IP 最后 8 位 % 节点数 相同的容器共用同一出口。
 DEFAULT_BRIDGE_OUTPUT_NODES: int = 15
 # 同一出口组访问同一站点的最小间隔（秒），从访问开始时计，失败也计入。
-SITE_COOLDOWN_SECONDS: int = 300
+SITE_COOLDOWN_SECONDS: int = 180
 
 # ============== 单页访问 ==============
 # 页面打开后的等待时间（秒），再做页面校验和链接提取。
