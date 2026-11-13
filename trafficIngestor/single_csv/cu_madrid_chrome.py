@@ -17,6 +17,7 @@ CONFIG = {
         "cl_url_madrid.csv",
     ),
     "DOCKER_NETWORK": "traffic_ingestor_geo_madrid_net",
+    "DOCKER_NETWORK_OUTPUT_NODES": 2,
     "DOCKER_NETWORK_SUBNET_PREFIX": 24,
     "DOCKER_NETWORK_GATEWAY": "172.18.4.1",
     "CONTAINER_IP_START": "172.18.4.2",

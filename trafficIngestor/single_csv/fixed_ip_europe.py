@@ -11,6 +11,7 @@ CONFIG = {
     "CONTAINER_COUNT": 2 * 40,
     "BASE_DST": "/netdisk2/pcz/TrafficSimulation/260528/fra",
     "DOCKER_NETWORK": "traffic_ingestor_geo_fra_net",
+    "DOCKER_NETWORK_OUTPUT_NODES": 2,
     "DOCKER_NETWORK_SUBNET_PREFIX": 24,
     "DOCKER_NETWORK_GATEWAY": "172.18.1.1",
     "CONTAINER_IP_START": "172.18.1.2",

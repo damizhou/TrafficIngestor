@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import ipaddress
+import math
 import os
 import posixpath
 import re
@@ -34,6 +35,7 @@ from host_scheduler.egress_cooldown import (
     CooldownTaskQueue,
     EgressCooldownGate,
     describe_container_ips,
+    task_site_key,
 )
 
 try:
@@ -93,8 +95,10 @@ class BaseTrafficIngestor(ABC):
     BASE_DST: str = ""
 
     # ============== 可选配置（有默认值）==============
-    # 容器池规模上限，默认 200；实际数量取它与任务数的较小值。
-    CONTAINER_COUNT: int = 200
+    # 容器池规模。None 表示自动：开启站点冷却时按
+    #   出口节点数 × ⌈网站数 × TASK_DURATION_ESTIMATE_SECONDS ÷ SITE_COOLDOWN_SECONDS⌉
+    # 计算（默认即 15 × 网站数），关闭冷却时为 200；显式设置时作为上限。最终再与任务数取较小值。
+    CONTAINER_COUNT: Optional[int] = None
     DOCKER_IMAGE = "chuanzhoupan/trace_spider_chrome:153_260909"
     BROWSER_NAME: str = "chrome"
     BROWSER_VERSION_COMMANDS: Tuple[Tuple[str, ...], ...] = (
@@ -127,6 +131,8 @@ class BaseTrafficIngestor(ABC):
     DOCKER_NETWORK_ATTACHMENT_WARN_THRESHOLD: Optional[int] = 900
     MOUNT_CODE_IN_CONTAINERS: bool = True
     CLEAN_AND_RECREATE_CONTAINERS: bool = True
+    # 默认 bridge 上按序号逐个创建容器，使容器序号与 Docker 分配的 IP 一一对应；False 恢复 20 线程并发创建。
+    SEQUENTIAL_CREATE_ON_DEFAULT_BRIDGE: bool = True
     DISABLE_OFFLOAD_DURING_POOL_PREPARE: bool = True
     DEFAULT_UID: int = get_default_uid()
     DEFAULT_GID: int = get_default_gid()
@@ -143,6 +149,10 @@ class BaseTrafficIngestor(ABC):
     WORKER_QUEUE_WAIT_TIMEOUT: float = 0.0
     # 同一出口节点访问同一网站（CSV domain 列）的最小启动间隔（秒）；0 表示关闭。
     SITE_COOLDOWN_SECONDS: float = 180.0
+    # 单个任务的预估耗时（秒），用于自动计算容器数。
+    TASK_DURATION_ESTIMATE_SECONDS: float = 180.0
+    # 自动计算的容器数上限：无论 CSV 中有多少个网站，自动容器数都不超过该值。
+    AUTO_CONTAINER_COUNT_MAX: int = 210
     # 默认 bridge 网络的出口节点数；容器 IP 最后 8 位 % 节点数 相同的容器共用同一出口。
     DEFAULT_BRIDGE_OUTPUT_NODES: int = 15
     # 自建网络（设置了 DOCKER_NETWORK）的出口节点数；开启冷却时必须在配置中给出。
@@ -1153,14 +1163,40 @@ class BaseTrafficIngestor(ABC):
         """Return min(CONTAINER_COUNT, task count) as the container pool size."""
         return min(max(int(task_count), 0), self.get_container_count_limit())
 
+    def compute_auto_container_count(self, jobs: List[Dict[str, str]]) -> Optional[Tuple[int, str]]:
+        """开启冷却时按网站数估算容器数：每个出口对每个网站每个冷却周期最多启动一个任务，
+        每个任务占用一个容器约 TASK_DURATION_ESTIMATE_SECONDS 秒。返回 (容器数, 说明)。"""
+        if not self.cooldown_enabled():
+            return None
+        nodes = self.get_output_node_count()
+        sites = len({task_site_key(task) for task in jobs})
+        estimate = float(self.TASK_DURATION_ESTIMATE_SECONDS)
+        per_node = max(math.ceil(sites * estimate / float(self.SITE_COOLDOWN_SECONDS)), 1)
+        detail = (f"出口节点={nodes} × ⌈网站数={sites} × 预估耗时={estimate:g}s ÷ "
+                  f"冷却={float(self.SITE_COOLDOWN_SECONDS):g}s⌉={per_node}")
+        count = nodes * per_node
+        limit = int(self.AUTO_CONTAINER_COUNT_MAX)
+        if count > limit:
+            detail += f" = {count}，超过自动上限 {limit}"
+            count = limit
+        return count, detail
+
     def configure_container_count_for_jobs(self, jobs: List[Dict[str, str]]) -> int:
         """Resolve and retain the actual pool size after the first task batch is known."""
-        count = self.resolve_container_count(len(jobs))
+        auto = self.compute_auto_container_count(jobs)
+        configured = getattr(self, "CONTAINER_COUNT", None)
+        if auto is None:
+            count = self.resolve_container_count(len(jobs))
+            reason = f"上限={self.get_container_count_limit()}"
+        else:
+            auto_count, detail = auto
+            count = min(auto_count, len(jobs))
+            reason = f"自动={auto_count}（{detail}）"
+            if configured is not None:
+                count = min(count, self.get_container_count_limit())
+                reason += f"，配置上限={self.get_container_count_limit()}"
         self._resolved_container_count = count
-        self.log(
-            f"容器数={count}（任务数={len(jobs)}，"
-            f"上限={self.get_container_count_limit()}）"
-        )
+        self.log(f"容器数={count}（任务数={len(jobs)}，{reason}）")
         return count
 
     def get_default_action_source(self) -> Path:
@@ -1250,9 +1286,14 @@ class BaseTrafficIngestor(ABC):
                     with created_lock:
                         created.append(name)
 
-        # Pass 1：并发创建不存在的容器
-        with ThreadPoolExecutor(max_workers=min(len(names), 20)) as pool:
-            pool.map(check_and_create, container_specs)
+        # Pass 1：创建不存在的容器。默认 bridge 不支持 --ip，按序号逐个创建，
+        # 让 Docker 依次分配地址，容器序号与 IP 一一对应；自建网络已用 --ip 固定，可并发创建。
+        if self.get_target_docker_network() == "bridge" and self.SEQUENTIAL_CREATE_ON_DEFAULT_BRIDGE:
+            for spec in container_specs:
+                check_and_create(spec)
+        else:
+            with ThreadPoolExecutor(max_workers=min(len(names), 20)) as pool:
+                pool.map(check_and_create, container_specs)
 
         # Pass 2：启动未运行的容器
         for n in names:
@@ -1260,6 +1301,7 @@ class BaseTrafficIngestor(ABC):
                 self.start_container(n)
 
         time.sleep(5)
+        self.verify_container_ip_order(names)
 
         # Pass 3：按配置对容器内 eth0 和宿主机 veth peer 关闭 offload
         if self.DISABLE_OFFLOAD_DURING_POOL_PREPARE:
@@ -1269,6 +1311,25 @@ class BaseTrafficIngestor(ABC):
 
         self._browser_label = self.detect_browser_label(names[0])
         return names
+
+    def verify_container_ip_order(self, names: List[str]) -> None:
+        """检查容器序号与 IP 是否一一对应（第 i 个容器 IP = 第 0 个容器 IP + i），只记录日志。"""
+        ips = [self.get_container_ipv4(name) for name in names]
+        if not names or not all(ips):
+            missing = [name for name, ip in zip(names, ips) if not ip]
+            self.log(f"WARN: 无法读取容器 IP，跳过序号与 IP 对应检查: {missing[:10]}")
+            return
+        base_ip = ipaddress.IPv4Address(ips[0])
+        mismatched = [
+            f"{name}={ip}(期望 {base_ip + index})"
+            for index, (name, ip) in enumerate(zip(names, ips))
+            if ipaddress.IPv4Address(ip) != base_ip + index
+        ]
+        if not mismatched:
+            self.log(f"容器序号与 IP 一一对应: {names[0]}={ips[0]} … {names[-1]}={ips[-1]}")
+            return
+        preview = ", ".join(mismatched[:10]) + (f" ... (+{len(mismatched) - 10})" if len(mismatched) > 10 else "")
+        self.log(f"WARN: {len(mismatched)} 个容器的 IP 与序号不对应（可能有其他容器同时创建或地址池有空洞）: {preview}")
 
     def prepare_existing_container_pool(self) -> List[str]:
         """Reuse the existing running container pool without creating or recreating it."""
@@ -2338,6 +2399,12 @@ class BaseTrafficIngestor(ABC):
         value = self.SITE_COOLDOWN_SECONDS
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
             raise FatalIngestorError(f"SITE_COOLDOWN_SECONDS 必须是非负数（秒），当前为 {value!r}")
+        limit = self.AUTO_CONTAINER_COUNT_MAX
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise FatalIngestorError(f"AUTO_CONTAINER_COUNT_MAX 必须是正整数，当前为 {limit!r}")
+        estimate = self.TASK_DURATION_ESTIMATE_SECONDS
+        if isinstance(estimate, bool) or not isinstance(estimate, (int, float)) or estimate <= 0:
+            raise FatalIngestorError(f"TASK_DURATION_ESTIMATE_SECONDS 必须是正数（秒），当前为 {estimate!r}")
         if self.cooldown_enabled():
             self.get_output_node_count()
 
