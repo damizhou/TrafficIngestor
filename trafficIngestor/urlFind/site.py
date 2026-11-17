@@ -259,6 +259,14 @@ class SiteCrawler:
             self.stats["dropped:bucket_full"] += 1
 
     def _pop_frontier(self) -> Optional[FrontierEntry]:
+        """取下一个待访问 URL，跳过入队后已被访问并提取过链接的页面（例如入队后又作为重定向目标被访问）。"""
+        while True:
+            entry = self._pop_frontier_once()
+            if entry is None or entry.key not in self.expanded:
+                return entry
+            self.stats["dropped:already_expanded"] += 1
+
+    def _pop_frontier_once(self) -> Optional[FrontierEntry]:
         """取已采集最少的桶；并列时按轮换顺序，取出后把桶移到末尾。"""
         best = None
         best_count = None

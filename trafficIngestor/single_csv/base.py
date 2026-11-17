@@ -7,7 +7,7 @@ from single_csv._common import PROJECT_ROOT
 
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
-    "BASE_DST": "/netdisk/lhx/20261105/chrome",
+    "BASE_DST": "/netdisk/yjn/20261113/",
     # 容器数不设置时自动计算：出口节点数 × ⌈网站数 × 预估耗时 ÷ 冷却时间⌉，默认即 15 × 网站数，
     # 自动值最多 210 个（AUTO_CONTAINER_COUNT_MAX）；设置后作为上限。
     # "CONTAINER_COUNT": 15,
@@ -17,9 +17,7 @@ CONFIG = {
     # "TASK_DURATION_ESTIMATE_SECONDS": 180,
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
-        "scripts",
-        "result",
-        "dailymirror-txt.csv",
+        "scripts/result/yjn/yjn_32_subpages_x3.csv",
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"

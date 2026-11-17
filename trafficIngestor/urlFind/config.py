@@ -25,7 +25,7 @@ RUN_NAME: str = "yjn_32"
 RUNTIME_DIR: str = os.path.join(PROJECT_ROOT, "runtime", "url_find", RUN_NAME)
 # 只运行这些站点（站点 key 与输入 CSV 一致）；为 None 时运行 CSV 中全部站点。
 # 未选中的站点仍参与站点归属判断，属于它们的链接不会进入选中站点的队列。
-ONLY_SITES: Optional[List[str]] = ["wikipedia.org", "vmware.com", "worldbank.org", "mobile-tracker-free.com"]
+ONLY_SITES: Optional[List[str]] = None
 
 # ============== 采集目标 ==============
 # 每个站点需要采集的 URL 数（只统计实际打开并校验通过的页面）。
@@ -54,6 +54,7 @@ EXCLUDE_KEYWORDS: List[str] = []
 SKIP_URL_PATTERNS: List[str] = [
     r"[?&]returnto=",      # 登录/注册页（MediaWiki 等），通常还会跳转到站外认证域名
     r"/w/index\.php\?",    # MediaWiki 工具页：编辑、历史、旧版本、特殊页面等
+    r"^https?://[^/]+/wiki/?$",  # MediaWiki 空标题根路径，必定重定向到已访问过的首页
 ]
 # 归一化时去掉的跟踪参数（utm_* 前缀另外处理）。
 TRACKING_QUERY_PARAMS: List[str] = [
