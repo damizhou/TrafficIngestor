@@ -8,8 +8,9 @@ from single_csv._common import PROJECT_ROOT
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
     "SHARED_FIXED_IP_NETWORK": "traffic_ingestor_geo_sgp_net",
-    "CONTAINER_COUNT": 20,
-    "BASE_DST": "/netdisk2/ww/wiki/20261112/chrome/sgp",
+    "SITE_COOLDOWN_SECONDS": 0,
+    "CONTAINER_COUNT": 40,
+    "BASE_DST": "/netdisk2/ww/wiki/20261121/chrome/sgp",
     "DOCKER_NETWORK": "traffic_ingestor_geo_sgp_net",
     "DOCKER_NETWORK_OUTPUT_NODES": 2,
     "DOCKER_NETWORK_SUBNET_PREFIX": 24,
@@ -20,7 +21,7 @@ CONFIG = {
         "scripts",
         "result",
         "ww",
-        "wiki20x3.csv",
+        "wikix3.csv",
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"
