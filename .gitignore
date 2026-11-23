@@ -18,3 +18,5 @@ scripts/csvs/
 temp/
 venv/
 trafficIngestor/traffic_capture_*
+# Local Server酱 credential
+.serverchan_sendkey

@@ -31,6 +31,8 @@ from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Any
 from concurrent.futures import ThreadPoolExecutor
 
+from host_scheduler.exit_ip_probe import query_container
+from host_scheduler.serverchan_notify import send_notification
 from host_scheduler.egress_cooldown import (
     CooldownTaskQueue,
     EgressCooldownGate,
@@ -157,6 +159,10 @@ class BaseTrafficIngestor(ABC):
     DEFAULT_BRIDGE_OUTPUT_NODES: int = 15
     # 自建网络（设置了 DOCKER_NETWORK）的出口节点数；开启冷却时必须在配置中给出。
     DOCKER_NETWORK_OUTPUT_NODES: Optional[int] = None
+    # 采集前只探测前 min(容器数, 网络出口节点数) 个容器。
+    LOG_CONTAINER_EXIT_IPS: bool = True
+    EXIT_IP_PROBE_TIMEOUT: int = 60
+    SERVERCHAN_SENDKEY_ENV: str = "SERVERCHAN_SENDKEY"
 
     def __init__(self):
         self._runtime_entry_script = self.get_entry_script_path()
@@ -195,6 +201,7 @@ class BaseTrafficIngestor(ABC):
         self._unusable_containers = set()
         # 出口节点 × 网站 冷却门控；容器池准备好后创建，SITE_COOLDOWN_SECONDS=0 时为 None
         self._egress_gate: Optional[EgressCooldownGate] = None
+        self._exit_ip_failures: List[str] = []
 
     @staticmethod
     def estimate_remaining_eta_seconds(remaining: int, per_min: float) -> float:
@@ -2382,8 +2389,8 @@ class BaseTrafficIngestor(ABC):
         nodes = self.DOCKER_NETWORK_OUTPUT_NODES
         if isinstance(nodes, bool) or not isinstance(nodes, int) or nodes <= 0:
             raise FatalIngestorError(
-                f"DOCKER_NETWORK={self.DOCKER_NETWORK} 开启了站点冷却（SITE_COOLDOWN_SECONDS="
-                f"{self.SITE_COOLDOWN_SECONDS}），必须在配置中给出正整数 DOCKER_NETWORK_OUTPUT_NODES，"
+                f"DOCKER_NETWORK={self.DOCKER_NETWORK} 的出口节点数无效，"
+                "必须在配置中给出正整数 DOCKER_NETWORK_OUTPUT_NODES，"
                 f"当前为 {nodes!r}"
             )
         return nodes
@@ -2396,6 +2403,13 @@ class BaseTrafficIngestor(ABC):
 
     def validate_egress_cooldown_config(self) -> None:
         """在创建容器之前校验，配置缺失时尽早失败。"""
+        if not isinstance(self.LOG_CONTAINER_EXIT_IPS, bool):
+            raise FatalIngestorError("LOG_CONTAINER_EXIT_IPS 必须是布尔值")
+        if self.LOG_CONTAINER_EXIT_IPS:
+            self.get_output_node_count()
+            timeout = self.EXIT_IP_PROBE_TIMEOUT
+            if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+                raise FatalIngestorError("EXIT_IP_PROBE_TIMEOUT 必须是正整数")
         value = self.SITE_COOLDOWN_SECONDS
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
             raise FatalIngestorError(f"SITE_COOLDOWN_SECONDS 必须是非负数（秒），当前为 {value!r}")
@@ -2407,6 +2421,55 @@ class BaseTrafficIngestor(ABC):
             raise FatalIngestorError(f"TASK_DURATION_ESTIMATE_SECONDS 必须是正数（秒），当前为 {estimate!r}")
         if self.cooldown_enabled():
             self.get_output_node_count()
+
+    def log_container_exit_ips(self, names: List[str]) -> None:
+        """在抓包前探测代表容器，结果只代表本次检测时的实际出口。"""
+        if not self.LOG_CONTAINER_EXIT_IPS or not names:
+            return
+        node_count = self.get_output_node_count()
+        selected = names[:node_count]
+        self.log(
+            f"出口 IP 检测: 网络={self.get_target_docker_network()} "
+            f"节点数={node_count} 容器数={len(names)} 检测数={len(selected)}"
+        )
+        with ThreadPoolExecutor(max_workers=min(len(selected), 20)) as pool:
+            results = pool.map(
+                lambda name: query_container(self, name, self.EXIT_IP_PROBE_TIMEOUT),
+                selected,
+            )
+            for name, internal_ip, external_ip, error in results:
+                if error:
+                    self._exit_ip_failures.append(
+                        f"container={name}, internal_ipv4={internal_ip or '-'}, error={error}"
+                    )
+                self.log(
+                    f"{'WARN: ' if error else ''}容器出口 IP: container={name} "
+                    f"internal_ipv4={internal_ip or '-'} external_ipv4={external_ip or '-'} "
+                    f"status={error or 'OK'}"
+                )
+        if self._exit_ip_failures:
+            self.notify_serverchan(
+                "采集出口 IP 检测失败",
+                "\n".join(self._exit_ip_failures),
+                "服务器报警|出口IP",
+            )
+
+    def notify_serverchan(self, title: str, desp: str, tags: str) -> None:
+        """发送 Server酱通知；通知失败只记录日志，不改变采集结果。"""
+        try:
+            response = send_notification(
+                title,
+                desp,
+                tags,
+                sendkey_env=self.SERVERCHAN_SENDKEY_ENV,
+            )
+        except Exception as exc:
+            self.log(f"WARN: Server酱推送失败: {exc}")
+            return
+        if response is None:
+            self.log("Server酱未配置 SendKey，跳过推送")
+        else:
+            self.log(f"Server酱推送完成: title={title}")
 
     def setup_egress_cooldown(self, names: List[str]) -> None:
         """读取容器实际 IP，按出口节点分组，建立冷却门控。"""
@@ -2723,6 +2786,7 @@ class BaseTrafficIngestor(ABC):
                     else:
                         names = self.prepare_existing_container_pool()
                     self._runtime_prepared = True
+                    self.log_container_exit_ips(names)
                     self.setup_egress_cooldown(names)
 
                 batch_num += 1
@@ -2788,6 +2852,13 @@ class BaseTrafficIngestor(ABC):
         self.log(f"[最终汇总] 批次={batch_num} | 运行时间={self.format_duration(elapsed)} | 总数={total_jobs} | "
                  f"完成={total_done} | 剩余={remaining} | 预计剩余={eta_text} | "
                  f"成功={self._global_ok} | 失败={self._global_fail} | 每分钟={per_min:.2f} | 平均耗时={avg_time:.1f}秒")
+        self.notify_serverchan(
+            f"{os.path.basename(str(self.CSV_PATH))}采集完成",
+            f"BASE_DST={self.BASE_DST}\n批次={batch_num}\n总数={total_jobs}\n完成={total_done}\n剩余={remaining}\n"
+            f"成功={self._global_ok}\n失败={self._global_fail}\n"
+            f"运行时间={self.format_duration(elapsed)}\n出口 IP 检测失败数={len(self._exit_ip_failures)}",
+            "采集完成",
+        )
         return batch_num > 0
 
     def setup(self) -> None:

@@ -46,6 +46,13 @@ RUN_POLICY = RunPolicy(
 BATCH_RUN_POLICY = RunPolicy(max_runs=1)
 
 
+def get_run_policy(definition: ProfileDefinition) -> RunPolicy:
+    config = definition.profile.class_attributes
+    if config.get("BATCH_BY_DOMAIN", False) or not config.get("DELETE_CSV_RECORD_ON_SUCCESS", True):
+        return BATCH_RUN_POLICY
+    return RUN_POLICY
+
+
 def load_profile_definition(config_path: str | Path) -> ProfileDefinition:
     """加载并校验命令行指定的单个配置文件。"""
     return load_shared_profile_definition(config_path, RUN_POLICY)
@@ -78,7 +85,7 @@ def build_ingestor(
     profile_attributes["ACTION_PROFILE"] = definition.action_profile
     configured_profile = CsvIngestorProfile(
         profile_attributes,
-        BATCH_RUN_POLICY if batch_by_domain else RUN_POLICY,
+        get_run_policy(definition),
     )
     return build_profile_ingestor(
         BaseTrafficIngestor,
@@ -95,8 +102,7 @@ def run_profile(
     definition: ProfileDefinition,
     ingestor_class: Type[BaseTrafficIngestor],
 ) -> None:
-    batch_by_domain = definition.profile.class_attributes.get("BATCH_BY_DOMAIN", False)
-    run_with_policy(ingestor_class, BATCH_RUN_POLICY if batch_by_domain else RUN_POLICY)
+    run_with_policy(ingestor_class, get_run_policy(definition))
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

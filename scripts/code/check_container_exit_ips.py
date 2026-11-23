@@ -15,8 +15,6 @@
 from __future__ import annotations
 
 import concurrent.futures
-import ipaddress
-import re
 import sys
 import tempfile
 from dataclasses import replace
@@ -33,6 +31,11 @@ for import_root in (PROJECT_ROOT, SOURCE_ROOT):
 
 from host_scheduler import single_csv_profiles as profile_runner
 from host_scheduler.csv_ingestor_common import CsvIngestorProfile
+from host_scheduler.exit_ip_probe import (
+    compact_command_error,
+    extract_ipv4,
+    query_container,
+)
 
 
 PROFILE_PATH = PROJECT_ROOT / "trafficIngestor" / "single_csv" / "fixed_ip_rsia.py"
@@ -40,30 +43,7 @@ CONTAINER_COUNT = 2
 MOUNT_CODE_IN_CONTAINERS = False
 DISABLE_OFFLOAD_DURING_POOL_PREPARE = False
 DOCKER_COMMAND_TIMEOUT = 60
-EXIT_IP_ENDPOINTS = (
-    "https://api.ipify.org",
-    "https://ifconfig.me/ip",
-    "https://icanhazip.com",
-)
-EXIT_IP_REQUEST_TIMEOUT = 15
 TEMPORARY_WORKSPACE_PREFIX = "traffic_ingestor_exit_ip_"
-EXIT_IP_QUERY = f"""
-for url in {' '.join(EXIT_IP_ENDPOINTS)}; do
-    if command -v curl >/dev/null 2>&1; then
-        value=$(curl -4 -fsS --max-time {EXIT_IP_REQUEST_TIMEOUT} "$url" 2>/dev/null || true)
-    elif command -v wget >/dev/null 2>&1; then
-        value=$(wget -qO- --timeout={EXIT_IP_REQUEST_TIMEOUT} "$url" 2>/dev/null || true)
-    else
-        exit 2
-    fi
-    if [ -n "$value" ]; then
-        printf '%s\\n' "$value"
-        exit 0
-    fi
-done
-exit 1
-""".strip()
-
 
 def resolve_profile_path(raw_path: Path) -> Path:
     if raw_path.is_absolute():
@@ -97,61 +77,6 @@ def build_probe_class(profile_path: Path, count: int, workspace: Path):
         definition,
         profile_runner.__name__,
     )
-
-
-def extract_ipv4(output: str) -> Optional[str]:
-    candidates = re.findall(r"(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)", output or "")
-    for candidate in candidates:
-        try:
-            address = ipaddress.ip_address(candidate)
-        except ValueError:
-            continue
-        if address.version == 4:
-            return str(address)
-    return None
-
-
-def compact_command_error(stdout: str, stderr: str) -> str:
-    detail = " ".join(part.strip() for part in (stdout, stderr) if part and part.strip())
-    return detail[:500] if detail else "无输出"
-
-
-def query_container(
-    ingestor,
-    container: str,
-    timeout: int,
-) -> Tuple[str, Optional[str], Optional[str], str]:
-    try:
-        internal_result = ingestor.run_cmd(
-            [
-                "docker",
-                "inspect",
-                "-f",
-                "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}",
-                container,
-            ],
-            timeout=timeout,
-        )
-    except Exception as exc:
-        return container, None, None, f"读取容器地址异常: {exc}"
-    internal_ip = extract_ipv4(internal_result.stdout)
-    if internal_result.returncode != 0 or not internal_ip:
-        error = compact_command_error(internal_result.stdout, internal_result.stderr)
-        return container, None, None, f"读取容器地址失败: {error}"
-
-    try:
-        external_result = ingestor.run_cmd(
-            ["docker", "exec", container, "sh", "-lc", EXIT_IP_QUERY],
-            timeout=timeout,
-        )
-    except Exception as exc:
-        return container, internal_ip, None, f"查询出口 IP 异常: {exc}"
-
-    external_ip = extract_ipv4(external_result.stdout)
-    if external_result.returncode != 0 or not external_ip:
-        error = compact_command_error(external_result.stdout, external_result.stderr)
-        return container, internal_ip, None, f"查询出口 IP 失败: {error}"
-    return container, internal_ip, external_ip, ""
 
 
 def print_results(

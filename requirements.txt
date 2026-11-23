@@ -3,3 +3,4 @@ tqdm
 SQLAlchemy
 PyMySQL
 openpyxl
+serverchan-sdk
