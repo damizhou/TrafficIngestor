@@ -33,10 +33,10 @@ SMALL_TOOLS_DIR = SCRIPT_DIR.parent
 
 # ===== 全局配置 =====
 # 要调整重复次数的 CSV 路径。
-CSV_PATH = SMALL_TOOLS_DIR / "result/ww/wiki.csv"
+CSV_PATH = SMALL_TOOLS_DIR / "result/ww/wiki_id_url_cert.csv"
 
 # 输出 CSV 路径。设为 None 表示原地覆盖 CSV_PATH。
-OUTPUT_CSV: Optional[Path] = SMALL_TOOLS_DIR / "result/ww/wikix3.csv"
+OUTPUT_CSV: Optional[Path] = SMALL_TOOLS_DIR / "result/ww/3xwiki_id_url_cert.csv"
 
 # 第一轮不重复记录要扩充输出的轮数。
 # 例如原文件只有 1 轮唯一记录，设置为 10 后会输出 10 轮。

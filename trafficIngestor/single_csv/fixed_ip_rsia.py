@@ -10,7 +10,7 @@ CONFIG = {
     "SHARED_FIXED_IP_NETWORK": "traffic_ingestor_geo_sgp_net",
     "SITE_COOLDOWN_SECONDS": 0,
     "CONTAINER_COUNT": 100,
-    "BASE_DST": "/netdisk2/ww/wiki/20261123/chrome/sgp",
+    "BASE_DST": "/netdisk2/ww/wiki/20261124/chrome/sgp",
     "DOCKER_NETWORK": "traffic_ingestor_geo_sgp_net",
     "DOCKER_NETWORK_OUTPUT_NODES": 2,
     "DOCKER_NETWORK_SUBNET_PREFIX": 24,
@@ -21,7 +21,7 @@ CONFIG = {
         "scripts",
         "result",
         "ww",
-        "wikix3.csv",
+        "3xwiki_id_url_cert.csv",
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"
