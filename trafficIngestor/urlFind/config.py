@@ -15,21 +15,26 @@ from typing import List, Optional
 SOURCE_ROOT: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT_ROOT: str = os.path.dirname(SOURCE_ROOT)
 
-# ============== 输入与输出 ==============
-# 输入 CSV：两列 id,domain，或单列 domain；domain 原样作为站点 key。
-SOURCE_CSV: str = os.path.join(PROJECT_ROOT, "scripts", "result", "yjn", "yjn_32_domains_seeds.csv")
+# ============== 每次任务需要修改的参数 ==============
+# 输入 CSV：两列 id,domain，或单列 domain（也可填完整 URL）；站点 key 为小写主机名。
+SOURCE_CSV: str = os.path.join(PROJECT_ROOT, "scripts", "result", "mlj", "domain.csv")
 # 每个站点输出到 {OUTPUT_BASE_DIR}/{site}/url_list.csv，列为 id,url,domain。
-OUTPUT_BASE_DIR: str = "/netdisk/yjn/website30/subpages"
+OUTPUT_BASE_DIR: str = "/netdisk/mlj/domain/subpages"
 # 运行目录名：状态快照、冷却表、每轮日志都放在 runtime/url_find/{RUN_NAME}/ 下。
-RUN_NAME: str = "yjn_32"
+# 同名目录中的状态会被恢复（断点续跑）；换一批站点时请换一个名字。
+RUN_NAME: str = "runtime"
 RUNTIME_DIR: str = os.path.join(PROJECT_ROOT, "runtime", "url_find", RUN_NAME)
+# 每个站点需要采集的 URL 数（只统计实际打开并校验通过的页面）。
+TARGET_URLS_PER_SITE: int = 500
+# 容器数量；主进程启动时一次性创建，运行中不再创建或重建。
+CONTAINER_COUNT: int = 15
+
+# ============== 站点选择 ==============
 # 只运行这些站点（站点 key 与输入 CSV 一致）；为 None 时运行 CSV 中全部站点。
 # 未选中的站点仍参与站点归属判断，属于它们的链接不会进入选中站点的队列。
 ONLY_SITES: Optional[List[str]] = None
 
 # ============== 采集目标 ==============
-# 每个站点需要采集的 URL 数（只统计实际打开并校验通过的页面）。
-TARGET_URLS_PER_SITE: int = 600
 # 访问次数上限 = TARGET_URLS_PER_SITE * MAX_VISIT_FACTOR，超过后站点结束为 partial。
 MAX_VISIT_FACTOR: int = 3
 # 种子阶段最多尝试次数（首次 + 5 次重试，每次换出口组；依次轮换 https://domain、https://www.domain、http://domain）。
@@ -76,8 +81,6 @@ PAGE_LOAD_TIMEOUT_SECONDS: int = 60
 VISIT_TIMEOUT_SECONDS: int = 150
 
 # ============== 容器池 ==============
-# 容器数量；主进程启动时一次性创建，运行中不再创建或重建。
-CONTAINER_COUNT: int = 150
 DOCKER_IMAGE: str = "chuanzhoupan/trace_spider_chrome:153_260909"
 # 启动时是否删除同前缀旧容器后重新创建（保证 IP 连续）。
 CLEAN_AND_RECREATE_CONTAINERS: bool = True

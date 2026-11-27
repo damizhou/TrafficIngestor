@@ -1,4 +1,10 @@
-"""容器公网出口 IPv4 探测，供采集日志与独立检测脚本共用。"""
+"""容器公网出口 IPv4 探测，供采集日志与独立检测脚本共用。
+
+只统计 IPv4 出口：端点全部使用仅解析 A 记录的 IPv4 专用域名，容器内再用
+`curl -4` 限定本端地址族，并在回包不是 IPv4 时继续尝试下一个端点。避免像
+`ifconfig.me`、`icanhazip.com` 这类双栈端点把出口节点的 IPv6 地址当成结果，
+被宿主机侧的 IPv4 解析器判为“查询出口 IP 失败”。
+"""
 
 from __future__ import annotations
 
@@ -8,9 +14,10 @@ from typing import Optional, Tuple
 
 
 EXIT_IP_ENDPOINTS = (
-    "https://api.ipify.org",
-    "https://ifconfig.me/ip",
-    "https://icanhazip.com",
+    # 只解析 A 记录的端点，不会返回 IPv6 地址。
+    "https://api4.ipify.org",
+    "https://ipv4.icanhazip.com",
+    "https://ipv4.ident.me",
 )
 EXIT_IP_REQUEST_TIMEOUT = 15
 EXIT_IP_QUERY = f"""
@@ -22,14 +29,19 @@ for url in {' '.join(EXIT_IP_ENDPOINTS)}; do
     else
         exit 2
     fi
-    if [ -n "$value" ]; then
-        printf '%s\\n' "$value"
-        exit 0
+    value=$(printf '%s' "$value" | tr -d '[:space:]')
+    case "$value" in
+        ''|*[!0-9.]*) continue ;;
+    esac
+    dots=$(printf '%s' "$value" | tr -cd '.' | wc -c)
+    if [ "$dots" -ne 3 ]; then
+        continue
     fi
+    printf '%s\\n' "$value"
+    exit 0
 done
 exit 1
 """.strip()
-
 
 
 def extract_ipv4(output: str) -> Optional[str]:

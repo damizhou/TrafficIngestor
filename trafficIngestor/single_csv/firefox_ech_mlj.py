@@ -9,17 +9,22 @@ CONFIG = {
     # 保留输入 CSV，便于失败后重新执行或核对 40 轮任务。
     "DELETE_CSV_RECORD_ON_SUCCESS": False,
     # 按实际存储环境修改为本次采集的结果根目录。
-    "BASE_DST": "/netdisk/mlj/20261111/ech",
+    "BASE_DST": "/netdisk/mlj/20261127/ech/sgp",
+    "CONTAINER_COUNT": 10,
+    "DOCKER_NETWORK": "traffic_ingestor_geo_sgp_net",
+    "DOCKER_NETWORK_OUTPUT_NODES": 10,
+    "DOCKER_NETWORK_SUBNET_PREFIX": 24,
+    "DOCKER_NETWORK_GATEWAY": "172.18.0.1",
+    "CONTAINER_IP_START": "172.18.0.2",
     "DOCKER_IMAGE": "chuanzhoupan/trace_spider_firefox:152.0.6",
     "BROWSER_NAME": "firefox",
     "BROWSER_VERSION_COMMANDS": (("firefox", "--version"),),
-    "CONTAINER_COUNT": 100,
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
         "scripts",
         "result",
         "mlj",
-        "ech-supported-hostnames_40.csv",
+        "theregister.csv",
     ),
 }
 

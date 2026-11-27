@@ -153,7 +153,7 @@ python trafficIngestor/host_scheduler_clash/single_csv_profiles.py trafficIngest
 - 开启冷却后容器数自动估算：`出口节点数 × ⌈网站数 × TASK_DURATION_ESTIMATE_SECONDS ÷ SITE_COOLDOWN_SECONDS⌉`，不超过 `AUTO_CONTAINER_COUNT_MAX`（默认 210）、任务数以及配置的 `CONTAINER_COUNT`。实际取值会打印在日志 `容器数=...` 中。
 
 ### 出口 IP 探测与告警通知
-`LOG_CONTAINER_EXIT_IPS = True`（默认）时，采集前对前 `min(容器数, 出口节点数)` 个容器探测公网出口 IPv4（`host_scheduler/exit_ip_probe.py`，超时 `EXIT_IP_PROBE_TIMEOUT` 秒），结果写入日志。独立检测可用 `python scripts/code/check_container_exit_ips.py`。
+`LOG_CONTAINER_EXIT_IPS = True`（默认）时，采集前对前 `min(容器数, 出口节点数)` 个容器探测公网出口 IPv4（`host_scheduler/exit_ip_probe.py`，超时 `EXIT_IP_PROBE_TIMEOUT` 秒），结果写入日志。探测只统计 IPv4：端点使用仅解析 A 记录的 `api4.ipify.org`、`ipv4.icanhazip.com`、`ipv4.ident.me`，容器内用 `curl -4` 限定 IPv4，回包不是 IPv4 时继续换下一个端点，因此出口节点的 IPv6 地址不会被判为失败。独立检测可用 `python scripts/code/check_container_exit_ips.py`，它复用同一份探测实现。
 
 探测失败时通过 Server酱发送告警（`host_scheduler/serverchan_notify.py`）。SendKey 按顺序读取环境变量 `SERVERCHAN_SENDKEY`、`SERVERCHAN_SENDKEY_FILE` 指向的文件、仓库根目录 `.serverchan_sendkey`（不入库）；未配置时只记录日志，不影响采集。
 
@@ -214,7 +214,7 @@ setcap -r "$(command -v ethtool)"  # 取消授权
 `ethtool` 升级或重装、二进制被替换、文件系统不支持 xattr、快照回滚等情况会导致 capability 丢失。授权后，能执行该文件的用户都可以修改网卡 offload 配置。
 
 ## URL 收集（urlFind）
-urlFind 的参数全部集中在 `trafficIngestor/urlFind/config.py`，修改后直接运行：
+`url_find.py` 不接收命令行参数，**唯一的配置文件是 `trafficIngestor/urlFind/config.py`**。改完配置后在项目根目录运行：
 
 ```bash
 python trafficIngestor/urlFind/url_find.py
@@ -222,19 +222,37 @@ python trafficIngestor/urlFind/url_find.py
 
 流程：读取站点列表 → 从状态快照恢复 → 一次性创建容器池 → 总调度按站点分发单页访问。容器内 `urlFind/worker/visit_page.py` 每次只访问一个页面，浏览器复用 `tools/browsers/chrome.py`，页面校验在 `urlFind/page_validation.py`。
 
-主要参数：
+### 每次任务需要修改的参数
+这几个参数位于 `config.py` 最上方的“每次任务需要修改的参数”区块：
 
-- `SOURCE_CSV`：输入站点列表，两列 `id,domain` 或单列 `domain`
-- `OUTPUT_BASE_DIR`：输出目录，每个站点写入 `{OUTPUT_BASE_DIR}/{site}/url_list.csv`（列 `id,url,domain`）
-- `RUN_NAME`：运行目录 `runtime/url_find/{RUN_NAME}/`，保存站点状态快照 `state/{site}.json`、冷却表 `state/cooldowns.json` 和每轮日志，支持断点续跑
-- `ONLY_SITES`：只运行指定站点；未选中站点仍参与站点归属判断
-- `TARGET_URLS_PER_SITE`、`MAX_VISIT_FACTOR`：每站目标 URL 数及访问次数上限
-- `SEED_MAX_ATTEMPTS`、`URL_MAX_RETRIES`、`NON_RETRYABLE_REJECTIONS`：种子与 URL 重试策略，重试会换到未用过的出口组
-- `EXCLUDE_KEYWORDS`、`SKIP_URL_PATTERNS`、`TRACKING_QUERY_PARAMS`：URL 过滤与归一化
-- `SITE_COOLDOWN_SECONDS`：同一出口组访问同一站点的最小间隔
-- `CONTAINER_COUNT`、`DOCKER_IMAGE`、`DOCKER_NETWORK`、`DOCKER_NETWORK_OUTPUT_NODES` 等：容器池与网络
+| 参数 | 说明 |
+| --- | --- |
+| `SOURCE_CSV` | 输入站点列表：`id,domain` 两列或单列 `domain`（也可以写完整 URL）。表头可省略；有第二列时读第二列。站点 key 为小写主机名，`www.example.com` 与 `example.com` 是两个站点 |
+| `OUTPUT_BASE_DIR` | 输出目录，每个站点写入 `{OUTPUT_BASE_DIR}/{site}/url_list.csv`（列 `id,url,domain`） |
+| `RUN_NAME` | 运行目录名，对应 `runtime/url_find/{RUN_NAME}/`，保存站点状态快照 `state/{site}.json`、冷却表 `state/cooldowns.json` 和每次运行的 `runs/<时间>/run.log`、`visits.csv`、`summary.csv`。同名目录会断点续跑，换一批站点时请换名字 |
+| `TARGET_URLS_PER_SITE` | 每个站点需要采集的 URL 数（只统计打开并校验通过的页面） |
+| `CONTAINER_COUNT` | 容器池大小，启动时一次性创建 |
 
-验证时建议用缩小版 CSV 或 `ONLY_SITES` 先跑少量站点。
+输入 CSV 示例：
+
+```csv
+id,domain
+1,abc.net.au
+2,dhl.com
+```
+
+### 其他参数（按需调整）
+
+- `ONLY_SITES`：只运行指定站点（填站点 key）；未选中站点仍参与站点归属判断。首次验证时建议只跑少量站点。
+- `MAX_VISIT_FACTOR`：访问次数上限 = `TARGET_URLS_PER_SITE × MAX_VISIT_FACTOR`。
+- `SEED_MAX_ATTEMPTS`、`URL_MAX_RETRIES`、`NON_RETRYABLE_REJECTIONS`：种子与 URL 重试策略，重试会换到未用过的出口组。
+- `EXCLUDE_KEYWORDS`、`SKIP_URL_PATTERNS`、`TRACKING_QUERY_PARAMS`：URL 过滤与归一化。
+- `SITE_COOLDOWN_SECONDS`、`DEFAULT_BRIDGE_OUTPUT_NODES`：同一出口组访问同一站点的最小间隔与出口节点数。
+- `PAGE_SETTLE_SECONDS`、`PAGE_LOAD_TIMEOUT_SECONDS`、`VISIT_TIMEOUT_SECONDS`：单页访问时序。
+- `DOCKER_IMAGE`、`CLEAN_AND_RECREATE_CONTAINERS`、`REMOVE_CONTAINERS_ON_EXIT`、`DOCKER_NETWORK`、`DOCKER_NETWORK_OUTPUT_NODES` 等：容器池与网络。
+
+### 常见失败
+- `seed_unreachable` 且 `top_rejections` 为 `offsite_redirect`：输入域名整站跳转到了另一个域名（例如 `theregister.co.uk` → `theregister.com`），跳转后的页面被判为站外。把 CSV 中的域名改成跳转后的域名再运行。
 
 ## Chrome 逐段下滑采集（实验）
 `tools/browsers/chrome_scroll.py` 在 `chrome.py` 的驱动基础上实现“打开 → 逐段下滑到底 → 保存快照”的访问流程，单次访问约 120 秒。它目前只供本地测试入口 `trafficIngestor/traffic_capture_scroll_test/run_capture.py` 使用（该目录不入库），尚未接入 single_csv / `BaseAction` 流程。

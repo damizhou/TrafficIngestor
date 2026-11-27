@@ -31,19 +31,16 @@ for import_root in (PROJECT_ROOT, SOURCE_ROOT):
 
 from host_scheduler import single_csv_profiles as profile_runner
 from host_scheduler.csv_ingestor_common import CsvIngestorProfile
-from host_scheduler.exit_ip_probe import (
-    compact_command_error,
-    extract_ipv4,
-    query_container,
-)
+from host_scheduler.exit_ip_probe import query_container
 
 
-PROFILE_PATH = PROJECT_ROOT / "trafficIngestor" / "single_csv" / "fixed_ip_rsia.py"
-CONTAINER_COUNT = 2
+PROFILE_PATH = PROJECT_ROOT / "trafficIngestor" / "single_csv" / "test.py"
+CONTAINER_COUNT = 1
 MOUNT_CODE_IN_CONTAINERS = False
 DISABLE_OFFLOAD_DURING_POOL_PREPARE = False
 DOCKER_COMMAND_TIMEOUT = 60
 TEMPORARY_WORKSPACE_PREFIX = "traffic_ingestor_exit_ip_"
+
 
 def resolve_profile_path(raw_path: Path) -> Path:
     if raw_path.is_absolute():

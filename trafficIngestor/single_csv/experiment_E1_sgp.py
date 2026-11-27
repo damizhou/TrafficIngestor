@@ -7,7 +7,6 @@ from single_csv._common import PROJECT_ROOT
 
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
-    "SHARED_FIXED_IP_NETWORK": "traffic_ingestor_geo_sgp_net",
     "DOCKER_IMAGE": "chuanzhoupan/trace_spider:250912",
     "BASE_DST": "/netdisk/pcz/experiment_E1_sgp",
     "CONTAINER_COUNT": 253,

@@ -7,21 +7,17 @@ from single_csv._common import PROJECT_ROOT
 
 CONFIG = {
     "DELETE_CSV_RECORD_ON_SUCCESS": True,
-    "SHARED_FIXED_IP_NETWORK": "traffic_ingestor_geo_sgp_net",
     "SITE_COOLDOWN_SECONDS": 0,
-    "CONTAINER_COUNT": 100,
-    "BASE_DST": "/netdisk2/ww/wiki/20261124/chrome/sgp",
+    "CONTAINER_COUNT": 10,
+    "BASE_DST": "/netdisk/pcz/test/rsia/20261127/fixed_ip",
     "DOCKER_NETWORK": "traffic_ingestor_geo_sgp_net",
-    "DOCKER_NETWORK_OUTPUT_NODES": 2,
+    "DOCKER_NETWORK_OUTPUT_NODES": 10,
     "DOCKER_NETWORK_SUBNET_PREFIX": 24,
     "DOCKER_NETWORK_GATEWAY": "172.18.0.1",
     "CONTAINER_IP_START": "172.18.0.2",
     "CSV_PATH": os.path.join(
         PROJECT_ROOT,
-        "scripts",
-        "result",
-        "ww",
-        "3xwiki_id_url_cert.csv",
+        "scripts/result/archive/top200000_ingestor_subpage.csv",
     ),
 }
 ACTION_PROFILE = "tools/browsers/chrome.py"
